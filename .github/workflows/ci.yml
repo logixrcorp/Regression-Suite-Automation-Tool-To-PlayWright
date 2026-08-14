@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+# A second push to the same branch cancels the first: nothing here is worth
+# paying for twice.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # The converter: parser, lowering, codegen, and the golden test that pins
+  # tests/CreateCustomer.spec.ts to what codegen actually emits today.
+  converter:
+    name: cargo (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo test --all-targets
+      - run: cargo clippy --all-targets -- -D warnings
+
+  # The output: the generated specs must typecheck and actually run. Both
+  # platforms, deliberately - the mock harness has already shipped one
+  # Linux-only browser path that made this suite unrunnable on Windows.
+  generated-tests:
+    name: playwright (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # postinstall fetches the Chromium build Playwright drives.
+      - run: npm ci
+
+      # OS-level libraries for that browser; Ubuntu only, everywhere else they
+      # ship with the download.
+      - if: runner.os == 'Linux'
+        run: npx playwright install-deps chromium
+
+      - name: Typecheck generated specs
+        run: npm run typecheck
+
+      - name: Run generated specs against the D365 mock
+        run: npm run test:mock

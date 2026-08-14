@@ -1,0 +1,36 @@
+rsat2pw
+Released into the public domain by Logixr Corp.
+Authored by Ehren Schlueter.
+
+See LICENSE (The Unlicense) for the dedication itself. This file records
+origin and the operating caveats; it imposes no conditions on use.
+
+
+NOT TESTED AGAINST A REAL PRODUCTION SYSTEM
+-------------------------------------------
+
+This software was built against synthetic schemas modelled on production
+shapes. The bundled Task Recorder recording fixture is synthetic, and the
+end-to-end suite runs against a mock reproducing D365's DOM contract — not
+a live environment. No part of it has been validated against an actual
+Dynamics 365 Finance & Operations instance.
+
+Treat the mapping table in src/lower.rs, the selectors in runtime/d365.ts,
+and every generated spec as a starting point to verify, not as working
+code. Run against a sandbox or test environment first, never straight at
+production.
+
+
+FREE FOR EVERYONE
+-----------------
+
+Use it, change it, ship it, sell it. No conditions attached, no attribution
+required.
+
+
+NO WARRANTY
+-----------
+
+Logixr is not responsible if it breaks your systems. Run at your own risk.
+The software is provided "as is", without warranty of any kind, express or
+implied.

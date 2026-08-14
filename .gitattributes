@@ -1,0 +1,8 @@
+# Normalize to LF in the repository and in working copies, so the golden tests
+# and the CI matrix behave the same on Windows and Linux.
+* text=auto eol=lf
+
+# Recording and parameter fixtures are archives, not text - never touch them.
+*.axtr binary
+*.xlsx binary
+*.png binary

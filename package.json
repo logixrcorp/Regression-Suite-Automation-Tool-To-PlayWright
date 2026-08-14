@@ -1,0 +1,18 @@
+{
+  "name": "rsat2pw-tests",
+  "private": true,
+  "type": "module",
+  "author": "Ehren Schlueter",
+  "license": "Unlicense",
+  "scripts": {
+    "postinstall": "playwright install chromium",
+    "typecheck": "tsc --noEmit",
+    "test": "playwright test",
+    "test:mock": "playwright test --config playwright.mock.config.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0",
+    "@types/node": "^26.2.0",
+    "typescript": "^5.6.0"
+  }
+}

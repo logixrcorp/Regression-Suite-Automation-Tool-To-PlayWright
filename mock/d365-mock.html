@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Mock D365 F&amp;O client</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 24px; }
+    .blockUI {
+      position: fixed; inset: 0; background: rgba(0,0,0,.35); color: #fff;
+      display: none; align-items: center; justify-content: center; z-index: 999;
+    }
+    [role="dialog"] { display: none; border: 1px solid #888; padding: 16px; margin-top: 16px; }
+    .lookupPopup { display: none; border: 1px solid #888; position: absolute; background: #fff; }
+    .lookupRow { padding: 4px 12px; cursor: pointer; }
+    .cell { display: inline-block; margin-right: 8px; }
+    label { display: block; margin: 6px 0; }
+  </style>
+</head>
+<body>
+  <!--
+    A deliberately minimal stand-in for the D365 web client. It reproduces only
+    the contract the runtime helper depends on:
+      * controls addressed by data-dyn-controlname
+      * forms addressed by data-dyn-form-name
+      * a persistent .blockUI overlay that is toggled, never removed
+      * dialogs as [role="dialog"] subtrees that re-scope control lookups
+      * grid cells addressed by column control name + data-dyn-row-index
+  -->
+  <div class="blockUI" id="blocker">Working…</div>
+
+  <div data-dyn-form-name="CustTableListPage">
+    <h1>All customers</h1>
+    <button data-dyn-controlname="SystemDefinedNewButton">New</button>
+    <button data-dyn-controlname="SystemDefinedSaveButton">Save</button>
+
+    <label>Customer account
+      <span data-dyn-controlname="CustAccount"><input id="listCustAccount" /></span>
+    </label>
+
+    <div data-dyn-controlname="LogisticsPostalAddressGrid">
+      <h2>Addresses</h2>
+      <div class="cell" data-dyn-controlname="Street" data-dyn-row-index="0"><input /></div>
+      <div class="cell" data-dyn-controlname="City" data-dyn-row-index="0"><input /></div>
+    </div>
+  </div>
+
+  <div role="dialog" id="createDialog">
+    <h2>Create customer</h2>
+    <label>Account <span data-dyn-controlname="CustAccount"><input id="dlgCustAccount" /></span></label>
+    <label>Name <span data-dyn-controlname="NameRef_Name"><input /></span></label>
+    <label>Group <span data-dyn-controlname="CustGroup"><input id="dlgCustGroup" /></span></label>
+    <label>Credit limit <span data-dyn-controlname="CustTable_CreditMax"><input /></span></label>
+    <button data-dyn-controlname="OkButton">OK</button>
+  </div>
+
+  <div class="lookupPopup" id="lookup">
+    <div class="lookupRow">10</div>
+    <div class="lookupRow">20</div>
+    <div class="lookupRow">30</div>
+  </div>
+
+  <script>
+    const blocker = document.getElementById('blocker');
+    const dialog = document.getElementById('createDialog');
+    const lookup = document.getElementById('lookup');
+
+    // Toggle visibility, never remove: this is what real D365 does, and it is
+    // exactly the case a naive "does the element exist" wait gets wrong.
+    function block(ms) {
+      blocker.style.display = 'flex';
+      setTimeout(() => { blocker.style.display = 'none'; }, ms);
+    }
+
+    document.querySelector('[data-dyn-controlname="SystemDefinedNewButton"]')
+      .addEventListener('click', () => { block(250); dialog.style.display = 'block'; });
+
+    document.querySelector('[data-dyn-controlname="OkButton"]')
+      .addEventListener('click', () => {
+        block(250);
+        document.getElementById('listCustAccount').value =
+          document.getElementById('dlgCustAccount').value;
+        dialog.style.display = 'none';
+      });
+
+    document.querySelector('[data-dyn-controlname="SystemDefinedSaveButton"]')
+      .addEventListener('click', () => block(400));
+
+    // Lookup: opens a flyout whose rows carry the exact option text.
+    document.getElementById('dlgCustGroup').addEventListener('click', () => {
+      const rect = dialog.getBoundingClientRect();
+      lookup.style.left = rect.left + 'px';
+      lookup.style.top = (rect.bottom + 4) + 'px';
+      lookup.style.display = 'block';
+    });
+
+    lookup.querySelectorAll('.lookupRow').forEach((row) => {
+      row.addEventListener('click', () => {
+        document.getElementById('dlgCustGroup').value = row.textContent.trim();
+        lookup.style.display = 'none';
+      });
+    });
+  </script>
+</body>
+</html>

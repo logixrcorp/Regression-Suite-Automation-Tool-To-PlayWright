@@ -1,0 +1,20 @@
+[package]
+name = "rsat2pw"
+version = "0.1.0"
+edition = "2024"
+authors = ["Ehren Schlueter"]
+license = "Unlicense"
+description = "Convert D365 Finance & Operations Task Recorder / RSAT recordings into Playwright tests."
+repository = "https://github.com/logixrcorp/Rsat2playwright"
+readme = "README.md"
+
+[dependencies]
+anyhow = "1.0.104"
+calamine = "0.36.1"
+clap = { version = "4.6.6", features = ["derive"] }
+heck = "0.5.0"
+minijinja = "2.24.0"
+quick-xml = { version = "0.41.0", features = ["serialize"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+zip = "8.6.0"
