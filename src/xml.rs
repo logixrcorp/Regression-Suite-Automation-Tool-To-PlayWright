@@ -78,12 +78,25 @@ impl Element {
     }
 }
 
+/// XML 1.0 §2.11 requires a processor to normalize CRLF and lone CR to LF
+/// before parsing. quick-xml is a low-level reader and leaves that to the
+/// caller, and Task Recorder runs on Windows - so without this a recorded
+/// multi-line value carries a stray `\r` into every generated string literal.
+fn normalize_line_endings(xml: &str) -> std::borrow::Cow<'_, str> {
+    if !xml.contains('\r') {
+        return std::borrow::Cow::Borrowed(xml);
+    }
+    std::borrow::Cow::Owned(xml.replace("\r\n", "\n").replace('\r', "\n"))
+}
+
 pub fn parse(xml: &str) -> Result<Element> {
+    let normalized = normalize_line_endings(xml);
+
     // Deliberately NOT trimming at the reader level: quick-xml splits text
     // around entity references, and trimming each fragment would silently eat
     // the spaces around them ("Contoso & Sons" -> "Contoso&Sons"). We trim once
     // at the point of use instead.
-    let reader = &mut Reader::from_str(xml);
+    let reader = &mut Reader::from_str(&normalized);
 
     let mut stack: Vec<Element> = Vec::new();
     let mut root: Option<Element> = None;
@@ -183,5 +196,14 @@ mod tests {
     fn unescapes_entities() {
         let doc = parse(r#"<r><V>Contoso &amp; Sons</V></r>"#).unwrap();
         assert_eq!(doc.text_of("V").as_deref(), Some("Contoso & Sons"));
+    }
+
+    /// Recordings are authored on Windows, so a multi-line recorded value
+    /// arrives CRLF-delimited. XML says a processor normalizes that to LF; if
+    /// we did not, every generated string literal would carry a stray `\r`.
+    #[test]
+    fn normalizes_windows_line_endings_like_an_xml_processor() {
+        let doc = parse("<r><V>a\r\nb\rc</V></r>").unwrap();
+        assert_eq!(doc.text_of("V").as_deref(), Some("a\nb\nc"));
     }
 }
