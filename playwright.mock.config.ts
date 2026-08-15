@@ -6,15 +6,22 @@ import { defineConfig } from '@playwright/test';
  * indexed grid cells). It verifies the converter and the runtime helper, not
  * the customer's environment.
  */
-process.env.D365_BASE_URL ||= 'http://127.0.0.1:3999';
+const MOCK_URL = process.env.D365_BASE_URL || 'http://127.0.0.1:3999';
 
 export default defineConfig({
   testDir: './tests',
+  // The mock has no identity provider, so the sign-in setup project must not
+  // run here. Default testMatch already skips *.setup.ts; this is explicit so
+  // it stays that way.
+  testIgnore: /.*\.setup\.ts/,
   timeout: 60_000,
   expect: { timeout: 10_000 },
   workers: 1,
   reporter: [['list']],
   use: {
+    // Same contract as the real config: generated specs navigate relatively,
+    // and the environment is supplied here. The mock needs no storageState.
+    baseURL: MOCK_URL,
     trace: 'off',
     screenshot: 'off',
     // Default to the browser `npx playwright install chromium` manages. Set

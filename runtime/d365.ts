@@ -38,13 +38,30 @@ const SYSTEM_COMMANDS: Record<string, string> = {
 };
 
 export interface D365Options {
-  /** e.g. https://<env>.operations.dynamics.com */
+  /**
+   * e.g. https://<env>.operations.dynamics.com
+   *
+   * Normally left unset: Playwright's `baseURL` supplies it from the config,
+   * so the environment is configured in one place instead of being baked into
+   * every generated spec.
+   */
   baseUrl?: string;
   /** D365 company / legal entity, appended as the `cmp` query parameter. */
   company?: string;
   /** How long to wait for the client to stop blocking, in ms. */
   idleTimeout?: number;
 }
+
+/**
+ * Hosts D365 hands off to when there is no valid session. Landing on one of
+ * these means the stored session is missing or expired.
+ */
+const SIGN_IN_HOSTS = [
+  'login.microsoftonline.com',
+  'login.microsoft.com',
+  'login.windows.net',
+  'adfs',
+];
 
 export class D365 {
   /** Innermost active scope: the page, or a dialog/form subtree. */
@@ -57,19 +74,63 @@ export class D365 {
 
   static async open(page: Page, options: D365Options = {}): Promise<D365> {
     const resolved: Required<D365Options> = {
-      baseUrl: options.baseUrl ?? process.env.D365_BASE_URL ?? '',
+      // Empty is the normal case: the URL then stays relative and Playwright
+      // resolves it against the `baseURL` in the config.
+      baseUrl: options.baseUrl ?? '',
       company: options.company ?? process.env.D365_COMPANY ?? 'USMF',
       idleTimeout: options.idleTimeout ?? 60_000,
     };
 
-    if (!resolved.baseUrl) {
-      throw new Error('Set D365_BASE_URL (or pass baseUrl) before running generated tests.');
-    }
-
     const d365 = new D365(page, resolved);
-    await page.goto(`${resolved.baseUrl}/?cmp=${resolved.company}`);
+    await d365.goto(`cmp=${encodeURIComponent(resolved.company)}`);
     await d365.waitForIdle();
     return d365;
+  }
+
+  /** Build a URL, relative unless an explicit base was supplied. */
+  private url(query: string): string {
+    return this.options.baseUrl ? `${this.options.baseUrl}/?${query}` : `/?${query}`;
+  }
+
+  private async goto(query: string): Promise<void> {
+    try {
+      await this.page.goto(this.url(query));
+    } catch (error) {
+      // A relative URL with no baseURL configured fails deep inside Playwright
+      // with "Invalid URL", which says nothing about what to fix.
+      if (!this.options.baseUrl && /invalid url/i.test(String(error))) {
+        throw new Error(
+          'No D365 environment configured. Set D365_BASE_URL in .env (it becomes ' +
+            "Playwright's baseURL), or pass baseUrl to D365.open().",
+        );
+      }
+      throw error;
+    }
+
+    await this.assertSignedIn();
+  }
+
+  /**
+   * Fail immediately when the client bounced us to sign-in.
+   *
+   * Without this the run continues against the identity provider's page and
+   * dies much later on a control lookup, reporting a missing D365 form rather
+   * than the expired session that actually caused it.
+   */
+  private async assertSignedIn(): Promise<void> {
+    const current = this.page.url();
+
+    if (!SIGN_IN_HOSTS.some((host) => current.includes(host))) {
+      return;
+    }
+
+    throw new Error(
+      `Not signed in - D365 redirected to ${current}\n\n` +
+        'The saved session is missing or expired. Refresh it with:\n' +
+        '  npx playwright test --project=setup\n\n' +
+        'If sign-in cannot be scripted on this tenant, capture one by hand:\n' +
+        '  npx playwright open --save-storage=playwright/.auth/user.json <D365 URL>',
+    );
   }
 
   // -- scoping --------------------------------------------------------------
@@ -146,10 +207,9 @@ export class D365 {
     // form). Output menu items are treated as bare here - that case is not
     // verified against a live environment, so check it before relying on it.
     const prefix = kind === 'Action' ? 'action:' : '';
-    const url =
-      `${this.options.baseUrl}/?mi=${prefix}${encodeURIComponent(menuItem)}` +
-      `&cmp=${encodeURIComponent(this.options.company)}`;
-    await this.page.goto(url);
+    await this.goto(
+      `mi=${prefix}${encodeURIComponent(menuItem)}&cmp=${encodeURIComponent(this.options.company)}`,
+    );
     await this.waitForIdle();
   }
 

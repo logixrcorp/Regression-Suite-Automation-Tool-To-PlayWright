@@ -2,3 +2,7 @@
 node_modules
 test-results
 playwright-report
+
+# Real credentials and the live session the setup project captures.
+.env
+playwright/.auth/

@@ -48,9 +48,15 @@ cargo build --release
     --params fixtures/CreateCustomer-params.xlsx \
     --emit-runtime
 
-npm install   # also fetches the Chromium build Playwright drives
-D365_BASE_URL=https://your-env.operations.dynamics.com npx playwright test
+npm install       # also fetches the Chromium build Playwright drives
+cp .env.sample .env   # fill in your environment URL and sign-in details
+npx playwright test
 ```
+
+Generated specs land in `tests/` and run as-is: they navigate with relative
+URLs against the `baseURL` in `playwright.config.ts`, and inherit their signed-in
+session from the `setup` project. Nothing about a converted recording needs
+editing to fit the harness.
 
 | Flag | Purpose |
 | --- | --- |
@@ -151,6 +157,46 @@ Use `--report out.json` for the machine-readable form if you want to gate a
 build on coverage. `--dry-run` writes nothing but still prints the summary
 above, which is the fastest way to see how a new recording will fare.
 
+## Signing in
+
+Sign-in follows the pattern from Elio Struyf's
+[testing-microsoft365-playwright-template](https://github.com/estruyf/testing-microsoft365-playwright-template):
+a `setup` project authenticates **once per run** and saves the session to
+`playwright/.auth/user.json`; every generated spec inherits it through
+`storageState`. D365 F&O signs in through the same Entra ID flow as the rest of
+Microsoft 365, so the same [`playwright-m365-helpers`](https://www.npmjs.com/package/playwright-m365-helpers)
+`login()` drives it.
+
+Three routes in, and **which one you get is decided by your tenant, not by
+preference**:
+
+| Your account | What to set | Which setup runs |
+| --- | --- | --- |
+| No MFA (CA exclusion) | `D365_USERNAME`, `D365_PASSWORD` | `tests/login.setup.ts` |
+| MFA via authenticator code | the above **+ `D365_OTP_SECRET`** | `tests/mfa.setup.ts` |
+| MFA via number match / push | nothing — capture by hand | setup skips |
+
+Setting `D365_OTP_SECRET` is what selects the MFA flow; there is no separate
+switch to keep in sync. The secret is the seed shown as "Can't scan the image?"
+when enrolling the authenticator, which lets the code be computed instead of
+read off a phone. Check a seed with `npm run generate:otp -- <secret>`.
+
+**Number matching and push approval cannot be automated** — that is the point of
+them. On those tenants capture a session once, by hand, and the setup project
+will step aside and reuse it:
+
+```bash
+npx playwright open --save-storage=playwright/.auth/user.json https://your-env.operations.dynamics.com
+```
+
+Sessions expire on your Conditional Access sign-in-frequency policy. Refresh
+one with `npm run auth`. If a run starts against a stale session, `D365.open()`
+detects the redirect to the identity provider and **fails immediately** with
+what to run next, rather than timing out a minute later complaining that a D365
+form is missing.
+
+`.env` and `playwright/.auth/` are both git-ignored.
+
 ## Verification
 
 ```bash
@@ -187,8 +233,8 @@ agent, point `CHROMIUM_PATH` at a browser you already have instead.
   bare name and action menu items with the documented `action:` prefix. Output
   menu items are sent unprefixed, which is *not* verified against a live
   environment — confirm it before converting a recording that opens a report.
-- **Authentication is out of scope.** D365 sign-in is federated; capture a
-  storage state once and set `D365_STORAGE_STATE` rather than scripting login.
+- **Check which MFA your tenant enforces.** TOTP can be automated; number
+  matching and push approval cannot. See **Signing in** above.
 - **Grids are virtualized.** `setGridCell` scrolls until the row materialises,
   but heavily filtered or sorted grids may need a business-key lookup instead of
   a row index.

@@ -8,11 +8,18 @@
     "postinstall": "playwright install chromium",
     "typecheck": "tsc --noEmit",
     "test": "playwright test",
-    "test:mock": "playwright test --config playwright.mock.config.ts"
+    "test:mock": "playwright test --config playwright.mock.config.ts",
+    "auth": "playwright test --project=setup",
+    "generate:otp": "node ./scripts/get-otp.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.0",
     "@types/node": "^26.2.0",
     "typescript": "^5.6.0"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "otpauth": "^9.5.1",
+    "playwright-m365-helpers": "^0.0.8"
   }
 }
