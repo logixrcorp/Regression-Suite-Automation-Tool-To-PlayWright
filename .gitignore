@@ -6,3 +6,8 @@ playwright-report
 # Real credentials and the live session the setup project captures.
 .env
 playwright/.auth/
+
+# .NET build output for the C# port.
+[Bb]in/
+[Oo]bj/
+.vs/

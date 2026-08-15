@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Synthetic Task Recorder recording used as a conversion fixture.
+
+  It follows the shape of a real AxTaskRecording export - i:type discriminators,
+  the <Childs> wrapper, a <Variables> block that RSAT surfaces as spreadsheet
+  columns - and covers the cases that matter: menu-item navigation, dialogs,
+  variable-bound input, lookups, virtualized grids, system commands,
+  validation, and one deliberately unknown action type to exercise the
+  escape hatch.
+
+  VERIFY against a real export before trusting element names: Task Recorder's
+  schema has drifted across platform updates. The parser is intentionally
+  tolerant, and lower.rs holds the whole mapping table in one place.
+-->
+<AxTaskRecording xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+  <Name>Create customer</Name>
+  <Variables>
+    <AxTaskRecordingVariable>
+      <Name>Customer account</Name>
+      <Value>US-9001</Value>
+    </AxTaskRecordingVariable>
+    <AxTaskRecordingVariable>
+      <Name>Customer name</Name>
+      <Value>Contoso Retail</Value>
+    </AxTaskRecordingVariable>
+    <AxTaskRecordingVariable>
+      <Name>Customer group</Name>
+      <Value>10</Value>
+    </AxTaskRecordingVariable>
+    <AxTaskRecordingVariable>
+      <Name>Street</Name>
+      <Value>123 Sample Way</Value>
+    </AxTaskRecordingVariable>
+  </Variables>
+
+  <Nodes>
+    <AxTaskRecordingNode i:type="TaskUserActionGroup">
+      <Annotation>Go to All customers</Annotation>
+      <Childs>
+        <AxTaskRecordingNode i:type="MenuItemUserAction">
+          <MenuItemName>CustTableListPage</MenuItemName>
+          <MenuItemType>Display</MenuItemType>
+        </AxTaskRecordingNode>
+        <AxTaskRecordingNode i:type="FormUserAction">
+          <FormName>CustTableListPage</FormName>
+          <ActionType>Open</ActionType>
+        </AxTaskRecordingNode>
+      </Childs>
+    </AxTaskRecordingNode>
+
+    <AxTaskRecordingNode i:type="TaskUserActionGroup">
+      <Annotation>Create a new customer</Annotation>
+      <Childs>
+        <AxTaskRecordingNode i:type="CommandUserAction">
+          <CommandName>New</CommandName>
+        </AxTaskRecordingNode>
+
+        <AxTaskRecordingNode i:type="DialogUserAction">
+          <Annotation>Create customer</Annotation>
+          <Childs>
+            <AxTaskRecordingNode i:type="InputUserAction">
+              <FormName>CustTable</FormName>
+              <ControlName>CustAccount</ControlName>
+              <VariableName>Customer account</VariableName>
+              <Value>US-9001</Value>
+            </AxTaskRecordingNode>
+            <AxTaskRecordingNode i:type="InputUserAction">
+              <FormName>CustTable</FormName>
+              <ControlName>NameRef_Name</ControlName>
+              <VariableName>Customer name</VariableName>
+              <Value>Contoso Retail</Value>
+            </AxTaskRecordingNode>
+            <AxTaskRecordingNode i:type="LookupUserAction">
+              <FormName>CustTable</FormName>
+              <ControlName>CustGroup</ControlName>
+              <VariableName>Customer group</VariableName>
+              <Value>10</Value>
+            </AxTaskRecordingNode>
+            <AxTaskRecordingNode i:type="InputUserAction">
+              <FormName>CustTable</FormName>
+              <ControlName>CustTable_CreditMax</ControlName>
+              <Value>50000</Value>
+            </AxTaskRecordingNode>
+            <AxTaskRecordingNode i:type="CommandUserAction">
+              <CommandName>OK</CommandName>
+            </AxTaskRecordingNode>
+          </Childs>
+        </AxTaskRecordingNode>
+      </Childs>
+    </AxTaskRecordingNode>
+
+    <AxTaskRecordingNode i:type="TaskUserActionGroup">
+      <Annotation>Add a primary address line</Annotation>
+      <Childs>
+        <AxTaskRecordingNode i:type="InputUserAction">
+          <FormName>CustTable</FormName>
+          <GridName>LogisticsPostalAddressGrid</GridName>
+          <ColumnName>Street</ColumnName>
+          <RowIndex>0</RowIndex>
+          <VariableName>Street</VariableName>
+          <Value>123 Sample Way</Value>
+        </AxTaskRecordingNode>
+        <AxTaskRecordingNode i:type="InputUserAction">
+          <FormName>CustTable</FormName>
+          <GridName>LogisticsPostalAddressGrid</GridName>
+          <ColumnName>City</ColumnName>
+          <RowIndex>0</RowIndex>
+          <Value>Redmond</Value>
+        </AxTaskRecordingNode>
+      </Childs>
+    </AxTaskRecordingNode>
+
+    <AxTaskRecordingNode i:type="TaskUserActionGroup">
+      <Annotation>Save and verify the customer was created</Annotation>
+      <Childs>
+        <AxTaskRecordingNode i:type="CommandUserAction">
+          <CommandName>Save</CommandName>
+        </AxTaskRecordingNode>
+        <AxTaskRecordingNode i:type="ValidateUserAction">
+          <FormName>CustTable</FormName>
+          <ControlName>CustAccount</ControlName>
+          <VariableName>Customer account</VariableName>
+        </AxTaskRecordingNode>
+        <AxTaskRecordingNode i:type="ExportToExcelUserAction">
+          <ControlName>ExportToExcelButton</ControlName>
+          <OfficeTemplate>CustomerV3</OfficeTemplate>
+        </AxTaskRecordingNode>
+      </Childs>
+    </AxTaskRecordingNode>
+  </Nodes>
+</AxTaskRecording>

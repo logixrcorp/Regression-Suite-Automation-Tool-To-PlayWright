@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Rsat2Pw</RootNamespace>
+    <AssemblyName>Rsat2Pw.Core</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\d365.ts" LogicalName="Rsat2Pw.d365.ts" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Rsat2Pw.Tests" />
+  </ItemGroup>
+
+</Project>

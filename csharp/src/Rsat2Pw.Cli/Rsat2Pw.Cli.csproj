@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Rsat2Pw.Cli</RootNamespace>
+    <AssemblyName>rsat2pw</AssemblyName>
+    <RollForward>Major</RollForward>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Rsat2Pw.Core\Rsat2Pw.Core.csproj" />
+  </ItemGroup>
+
+</Project>

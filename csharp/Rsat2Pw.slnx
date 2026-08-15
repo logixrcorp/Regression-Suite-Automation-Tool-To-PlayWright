@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Rsat2Pw.Cli/Rsat2Pw.Cli.csproj" />
+    <Project Path="src/Rsat2Pw.Core/Rsat2Pw.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Rsat2Pw.Tests/Rsat2Pw.Tests.csproj" />
+  </Folder>
+</Solution>

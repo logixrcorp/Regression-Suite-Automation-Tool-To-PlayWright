@@ -39,6 +39,28 @@ jobs:
       - run: cargo test --all-targets
       - run: cargo clippy --all-targets -- -D warnings
 
+  # The C# port. Its parity suite pins output to the Rust build byte for byte,
+  # so a divergence between the two implementations fails here.
+  csharp:
+    name: dotnet (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        working-directory: csharp
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - run: dotnet build --configuration Release
+      - run: dotnet test --configuration Release --no-build
+
   # The output: the generated specs must typecheck and actually run. Both
   # platforms, deliberately - the mock harness has already shipped one
   # Linux-only browser path that made this suite unrunnable on Windows.

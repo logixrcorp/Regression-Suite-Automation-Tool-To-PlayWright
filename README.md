@@ -1,7 +1,13 @@
 # rsat2pw
 
 Convert Dynamics 365 Finance & Operations **Task Recorder / RSAT** recordings
-into runnable **Playwright** tests. Converter in Rust, output in TypeScript.
+into runnable **Playwright** tests. Output is TypeScript; the converter comes in
+two implementations that emit byte-identical output — **Rust** at the repository
+root, and **C#** under [`csharp/`](csharp/). Pick whichever fits your build.
+
+The conversion is **deterministic**: a fixed mapping table, no model involved.
+The same recording produces the same TypeScript every time, which is why two
+independent implementations can be held to byte-for-byte agreement in CI.
 
 > ## ⚠️ Read this before you run it
 >
@@ -11,8 +17,9 @@ into runnable **Playwright** tests. Converter in Rust, output in TypeScript.
 > that reproduces D365's DOM contract, not a live environment. No part of this
 > has been validated against an actual D365 F&O instance.
 >
-> Treat the mapping table in `lower.rs`, the selectors in `runtime/d365.ts`, and
-> every generated spec as a **starting point to verify**, not as working code.
+> Treat the mapping table in `lower.rs` (or `csharp/src/Rsat2Pw.Core/Lower.cs`),
+> the selectors in `runtime/d365.ts`, and every generated spec as a
+> **starting point to verify**, not as working code.
 > Run it against a sandbox or test environment first — never straight at
 > production.
 >
@@ -210,6 +217,16 @@ npm run test:mock       # generated specs actually run, against the mock
 today, so the worked example in this README can never drift from the code.
 Regenerate it with the `rsat2pw` invocation under **Quick start** if you change
 codegen deliberately.
+
+The C# port has its own suite, and its parity tests assert that its output is
+byte-identical to the Rust build's committed output:
+
+```bash
+cd csharp && dotnet test
+```
+
+CI runs both implementations on Linux and Windows, so a divergence between them
+fails the build.
 
 `mock/` is a self-test harness: a stand-in page reproducing D365's DOM contract
 (`data-dyn-controlname`, a toggled `.blockUI` overlay, `[role="dialog"]`
