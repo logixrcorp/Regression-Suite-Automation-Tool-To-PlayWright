@@ -217,6 +217,33 @@ Test-Case 'unknown commands are reported by their verb' {
     Assert-Equal 'Grid' $action.Props['ControlType']
 }
 
+Test-Case 'a form part rendering is skipped and its filter scope flattened' {
+    # From a real customer recording: four OpenFormPart arrive in a row directly
+    # after navigate, before the first click in the whole file. That is a page
+    # rendering its FactBoxes, not a user opening four parts by hand.
+    $rec = ConvertFrom-RecordingText -XmlText @'
+<Recording xmlns:i="http://www.w3.org/2001/XMLSchema-instance"><Name>T</Name><RootScope><Children>
+  <Node i:type="CommandUserAction"><CommandName>OpenFormPart</CommandName>
+    <ControlName>EcoResProductVariantsPerCompanyPart</ControlName><ControlType>Part</ControlType></Node>
+  <Node i:type="Scope"><IsForm>true</IsForm><IsStepGroup>false</IsStepGroup>
+    <Name>__partlinkfilter_RetailItemChannelFactBox</Name><ScopeType>Public</ScopeType>
+    <Children>
+      <Node i:type="CommandUserAction"><CommandName>Click</CommandName>
+        <ControlName>InventItemOrderSetupAction</ControlName><ControlType>MenuItemButton</ControlType></Node>
+    </Children></Node>
+</Children></RootScope></Recording>
+'@
+    $actions = (ConvertTo-IrTestCase -Recording $rec).Actions
+
+    Assert-Equal 'skipped' $actions[0].Op
+    Assert-Equal 'CommandUserAction:OpenFormPart' $actions[0].RawKind
+
+    # The filter scope is the client's own: its child is lifted out rather than
+    # nested inside a form nobody navigated to.
+    Assert-Equal 'click' $actions[1].Op
+    Assert-Equal 'InventItemOrderSetupAction' $actions[1].Control
+}
+
 Write-Host 'the parser'
 
 Test-Case 'UserActions is not read as a second action list' {

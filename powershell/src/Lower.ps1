@@ -19,6 +19,11 @@ $script:ValueKeys    = @('Value', 'NewValue', 'Text', 'InputValue')
 $script:VariableKeys = @('VariableName', 'Variable', 'ParameterName')
 $script:LabelKeys    = @('Description', 'CustomDescription', 'Annotation', 'Name')
 
+# Scopes the client generates around a FactBox's part-link filter. They are not
+# forms anyone navigated to, and a page with four FactBoxes buries its real
+# actions four levels deep in them.
+$script:PartLinkFilterPrefix = '__partlinkfilter_'
+
 # Forms that belong to the recorder, not to the business process. Task Recorder
 # runs inside the client it is recording, so its own pane shows up as a form
 # scope wrapped around perfectly ordinary actions; keeping the scope would nest
@@ -306,6 +311,10 @@ function Get-ScopeLabel {
 function Test-RecorderInternalForm {
     param([Parameter(Mandatory)] [string] $Form)
 
+    if ($Form.StartsWith($script:PartLinkFilterPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $true
+    }
+
     foreach ($name in $script:RecorderInternalForms) {
         if ([string]::Equals($name, $Form, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
     }
@@ -415,6 +424,13 @@ function ConvertTo-IrCommand {
             if ($null -ne $shortcut -and $shortcut.Length -gt 0) {
                 return (New-IrAction -Op 'shortcut' -Fields @{ Name = $shortcut })
             }
+        }
+        # A FactBox coming up as its page loads. In every recording to hand
+        # these arrive in a run immediately after navigation, before the first
+        # gesture - so there is no click to replay, and waiting for the part is
+        # what the runtime already does before touching anything on it.
+        'openformpart' {
+            return (New-IrSkipped -Node $Node -Why 'a form part rendering; navigation brings it up')
         }
         'requestclose' { return (New-IrAction -Op 'closeForm' -Fields @{}) }
     }

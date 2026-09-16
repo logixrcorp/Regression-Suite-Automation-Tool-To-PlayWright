@@ -31,6 +31,11 @@ const VALUE_KEYS: &[&str] = &["Value", "NewValue", "Text", "InputValue"];
 const VARIABLE_KEYS: &[&str] = &["VariableName", "Variable", "ParameterName"];
 const LABEL_KEYS: &[&str] = &["Description", "CustomDescription", "Annotation", "Name"];
 
+/// Scopes the client generates around a FactBox's part-link filter. They are
+/// not forms anyone navigated to, and a page with four FactBoxes buries its
+/// real actions four levels deep in them.
+const PART_LINK_FILTER_PREFIX: &str = "__partlinkfilter_";
+
 /// Forms that belong to the recorder, not to the business process. Task
 /// Recorder runs inside the client it is recording, so its own pane shows up
 /// as a form scope wrapped around perfectly ordinary actions; keeping the
@@ -247,6 +252,12 @@ fn scope_label(node: &RecNode) -> String {
 }
 
 fn is_recorder_internal(form: &str) -> bool {
+    if form.len() >= PART_LINK_FILTER_PREFIX.len()
+        && form[..PART_LINK_FILTER_PREFIX.len()].eq_ignore_ascii_case(PART_LINK_FILTER_PREFIX)
+    {
+        return true;
+    }
+
     RECORDER_INTERNAL_FORMS
         .iter()
         .any(|f| f.eq_ignore_ascii_case(form))
@@ -335,6 +346,11 @@ fn lower_command(node: &RecNode, ctx: &mut Ctx) -> Action {
         // Opening the filter flyout. `filter()` does that itself as part of
         // applying one, so replaying this would just toggle the pane shut.
         "getfilters" => skipped(node, "opens the filter pane; filter() does that itself"),
+        // A FactBox coming up as its page loads. In every recording to hand
+        // these arrive in a run immediately after navigation, before the first
+        // gesture - so there is no click to replay, and waiting for the part is
+        // what the runtime already does before touching anything on it.
+        "openformpart" => skipped(node, "a form part rendering; navigation brings it up"),
         "requestclose" => Action::CloseForm,
         _ => unsupported(node),
     }
@@ -892,6 +908,41 @@ mod tests {
         );
     }
 
+
+
+    /// From a real customer recording: four of these arrive in a row directly
+    /// after `navigate`, before the first click in the whole file. That is a
+    /// page rendering its FactBoxes, not a user opening four parts by hand.
+    #[test]
+    fn a_form_part_rendering_is_skipped_and_its_filter_scope_flattened() {
+        let a = actions(
+            r#"<Node i:type="CommandUserAction"><CommandName>OpenFormPart</CommandName>
+                 <ControlName>EcoResProductVariantsPerCompanyPart</ControlName>
+                 <ControlType>Part</ControlType></Node>
+               <Node i:type="Scope">
+                 <IsForm>true</IsForm><IsStepGroup>false</IsStepGroup>
+                 <Name>__partlinkfilter_RetailItemChannelFactBox</Name><ScopeType>Public</ScopeType>
+                 <Children>
+                   <Node i:type="CommandUserAction"><CommandName>Click</CommandName>
+                     <ControlName>InventItemOrderSetupAction</ControlName>
+                     <ControlType>MenuItemButton</ControlType></Node>
+                 </Children>
+               </Node>"#,
+        );
+
+        assert!(matches!(&a[0], Action::Skipped { raw_kind, .. }
+            if raw_kind == "CommandUserAction:OpenFormPart"));
+
+        // The filter scope is the client's own: its child is lifted out rather
+        // than nested inside a form nobody navigated to.
+        assert_eq!(
+            a[1],
+            Action::Click {
+                control: "InventItemOrderSetupAction".into(),
+                control_type: "MenuItemButton".into()
+            }
+        );
+    }
 
     /// Verbs the recorder emits that our own corpus of recordings happens not
     /// to contain. They were found in another converter's dispatch table -
