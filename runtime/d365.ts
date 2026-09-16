@@ -750,10 +750,24 @@ export class D365 {
     return this.gridRow(gridName, 0);
   }
 
+  /**
+   * A cell of `row` that is safe to click in order to select it.
+   *
+   * Clicking the row itself lands on its centre point, and if that point falls
+   * on the row's hyperlink the client drills into the record instead of
+   * selecting it - the grid is then gone, and every later step fails looking
+   * for it. Which cell the centre lands on depends on font metrics, so this
+   * reproduces on one platform and not another.
+   */
+  private async selectableCell(row: Locator): Promise<Locator> {
+    const plain = row.locator(':scope > *').filter({ hasNot: this.page.locator('a') });
+    return (await plain.count()) ? plain.last() : row;
+  }
+
   /** `CommandName=ChangeSelectedIndexInCache` - move the grid cursor. */
   async selectRow(gridName: string, row: number): Promise<void> {
     const target = await this.gridRow(gridName, row);
-    await target.click();
+    await (await this.selectableCell(target)).click();
     this.cursor.set(gridName, row);
     await this.waitForIdle();
   }
@@ -766,8 +780,9 @@ export class D365 {
     if (await box.count()) {
       await box.click();
     } else {
-      // No selection column: the client marks the row on a plain click.
-      await row.click();
+      // No selection column: the client marks the row on a plain click - but
+      // not on the link cell, which would open the record instead.
+      await (await this.selectableCell(row)).click();
     }
 
     await this.waitForIdle();

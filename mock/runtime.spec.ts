@@ -28,6 +28,12 @@ test('stale form, virtualized grid, stacked dialog, rewritten value', async ({ p
     await expect(page.locator('[aria-rowindex="6"]')).toHaveCount(0);
     await d365.selectRow('Grid', 5);
     await expect(page.locator('#gridWindow')).toHaveText('3');
+
+    // Selecting a row must not open it. The link fills the row, so a click on
+    // the row's centre lands on the link and drills in - taking the grid away
+    // from every step that follows.
+    await expect(page.locator('#listSection')).toBeVisible();
+    await expect(page.locator('#detailSection')).toBeHidden();
     await d365.openRow('Grid');
   });
 

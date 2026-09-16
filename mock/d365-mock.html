@@ -20,6 +20,11 @@
     .dialog { z-index: 60; }
     .dialog.stacked { z-index: 70; margin-top: 40px; margin-left: 40px; }
     label { display: block; margin: 6px 0; }
+    /* The link fills the row, so the row's centre point is on it. Selecting a
+       row by clicking its centre therefore opens the record instead - which is
+       exactly the bug this shape exists to catch. */
+    .rowLink { flex: 1; }
+    .rowTag { width: 12px; text-align: right; }
   </style>
 </head>
 <body>
@@ -51,7 +56,10 @@
         after that reads STALE. Every visibility filter in the runtime exists
         for this case and none of them were tested.
       * a VIRTUALIZED grid that renders three rows at a time and materializes
-        more on PageDown, so the scroll loop in gridRow() actually runs.
+        more on PageDown, so the scroll loop in gridRow() actually runs. Its
+        rows are laid out with the hyperlink filling the row, so the centre
+        point is on the link: selecting a row by clicking the row opens the
+        record instead, and the grid disappears from under the next step.
       * a SECOND dialog that stacks on the first and reuses its button name, so
         form scoping is tested rather than assumed.
       * a value the client REWRITES on blur, because a field does not
@@ -234,7 +242,7 @@
         .slice(windowStart, windowStart + WINDOW)
         .map(({ id, index }) => `
           <div class="fixedDataTableRowLayout_main">
-            <div aria-rowindex="${index + 1}"><a href="#" data-row="${index}">${id}</a><span>Row ${index}</span></div>
+            <div aria-rowindex="${index + 1}"><a href="#" data-row="${index}" class="rowLink">${id}</a><span class="rowTag">·</span></div>
           </div>`)
         .join('');
 
