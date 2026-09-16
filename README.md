@@ -18,9 +18,10 @@ Point it at a Task Recorder recording and it emits a Playwright spec you can
 commit, review and run in CI. Recorded variables become data-driven fixtures, so
 one recording still covers many rows of RSAT test data.
 
-The converter ships as **two independent implementations that emit byte-identical
-output** — Rust at the repository root, C# under [`csharp/`](csharp/). Use
-whichever fits your build pipeline.
+The converter ships as **three independent implementations that emit
+byte-identical output** — Rust at the repository root, C# under
+[`csharp/`](csharp/), and PowerShell under [`powershell/`](powershell/). Use whichever
+fits your build pipeline; the PowerShell one needs nothing installed at all.
 
 Conversion is **deterministic**: a fixed mapping table, no model involved. The
 same recording produces the same TypeScript every time, which is what allows two
@@ -100,10 +101,16 @@ RSAT .xlsx parameters                                     params.rs
 | --- | --- | --- |
 | Rust | the Rust converter | 1.85+ (edition 2024) |
 | .NET SDK | the C# converter | 10.0 |
+| PowerShell | the PowerShell converter | 5.1 (in-box on Windows) or 7+ |
 | Node.js | running the generated tests | 22+ |
 
-You need **either** Rust **or** .NET — not both. Node.js is required in all
-cases, since the output is Playwright TypeScript.
+You need **one** of Rust, .NET or PowerShell — not all three. Node.js is
+required in every case, since the output is Playwright TypeScript.
+
+The PowerShell build exists for the machine that has none of the above: it runs
+on the Windows PowerShell already present on any Windows box, reads as plain
+text an administrator can review, and installs nothing. It is held to the same
+byte-for-byte contract as the other two.
 
 ## Quick start
 
@@ -351,6 +358,7 @@ reporting a missing D365 form.
 | --- | --- |
 | `src/` | the Rust converter |
 | `csharp/` | the C# converter, with its own tests and README |
+| `powershell/` | the PowerShell converter, with its own tests |
 | `runtime/d365.ts` | hand-written Playwright runtime the generated specs call into |
 | `tests/` | generated specs, plus the sign-in setup projects |
 | `constants/` | auth file path and credential resolution |
@@ -417,11 +425,15 @@ names, one case per row) and the tall `Name`/`Value` layout.
 cargo test              # parser, lowering, codegen + golden tests
 npx tsc --noEmit        # generated TypeScript typechecks
 npm run test:mock       # generated specs actually run, against the mock
-cd csharp && dotnet test    # C# suite, including byte-parity with the Rust output
+cd csharp && dotnet test          # C# suite, including byte-parity
+./powershell/tests/Run-Tests.ps1  # PowerShell suite, including byte-parity
 ```
 
-CI runs all of the above on **Linux and Windows**, so a divergence between the
-two implementations fails the build.
+CI runs all of the above on **Linux and Windows**, so a divergence between any
+two implementations fails the build. The PowerShell suite runs twice on
+Windows: once under PowerShell 7 and once under Windows PowerShell 5.1, which
+is a different engine on a different runtime and is what the machines this
+build exists for actually have.
 
 **How the mapping table was derived.** Not from documentation — from real
 exported recordings. Eight of them are public on GitHub, found by searching for
