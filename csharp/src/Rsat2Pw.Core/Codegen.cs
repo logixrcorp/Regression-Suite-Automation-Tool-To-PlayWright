@@ -141,47 +141,11 @@ public static class Codegen
         switch (action)
         {
             case Action.Navigate a:
-                Line(output, pad, $"await d365.navigate('{Ir.EscapeTs(a.MenuItem)}', '{Ir.KindAsString(a.Kind)}');");
+                Call(output, pad, $"navigate('{Ir.EscapeTs(a.MenuItem)}', '{Ir.KindAsString(a.Kind)}')");
                 break;
 
-            case Action.EnterForm a:
-                Line(output, pad, $"await d365.enterForm('{Ir.EscapeTs(a.Form)}');");
-                break;
-
-            case Action.LeaveForm a:
-                Line(output, pad, $"await d365.leaveForm('{Ir.EscapeTs(a.Form)}');");
-                break;
-
-            case Action.SetValue a:
-                Line(output, pad, $"await d365.setField('{Ir.EscapeTs(a.Control)}', {a.Value.ToTs()});");
-                break;
-
-            case Action.SetGridValue a:
-                Line(
-                    output,
-                    pad,
-                    $"await d365.setGridCell('{Ir.EscapeTs(a.Grid)}', '{Ir.EscapeTs(a.Column)}', "
-                    + $"{a.Row.ToString(CultureInfo.InvariantCulture)}, {a.Value.ToTs()});");
-                break;
-
-            case Action.Click a:
-                Line(output, pad, $"await d365.click('{Ir.EscapeTs(a.Control)}');");
-                break;
-
-            case Action.Command a:
-                Line(output, pad, $"await d365.command('{Ir.EscapeTs(a.Name)}');");
-                break;
-
-            case Action.Lookup a:
-                Line(output, pad, $"await d365.lookup('{Ir.EscapeTs(a.Control)}', {a.Value.ToTs()});");
-                break;
-
-            case Action.Validate a:
-                Line(output, pad, $"await d365.expectValue('{Ir.EscapeTs(a.Control)}', {a.Expected.ToTs()});");
-                break;
-
-            case Action.Dialog a:
-                Line(output, pad, $"await d365.withDialog('{Ir.EscapeTs(a.Name)}', async () => {{");
+            case Action.Form a:
+                Line(output, pad, $"await d365.withForm('{Ir.EscapeTs(a.FormName)}', async () => {{");
                 EmitAll(a.Children, indent + 1, onUnsupported, output);
                 Line(output, pad, "});");
                 break;
@@ -191,6 +155,88 @@ public static class Codegen
                 EmitAll(a.Children, indent + 1, onUnsupported, output);
                 Line(output, pad, "});");
                 output.Append('\n');
+                break;
+
+            case Action.Click a:
+                Call(output, pad, $"click('{Ir.EscapeTs(a.Control)}', '{Ir.EscapeTs(a.ControlType)}')");
+                break;
+
+            case Action.Tab a:
+                Call(output, pad, $"tab('{Ir.EscapeTs(a.Control)}')");
+                break;
+
+            case Action.SetValue a:
+                Call(
+                    output,
+                    pad,
+                    $"setField('{Ir.EscapeTs(a.Control)}', {a.Value.ToTs()}, '{Ir.EscapeTs(a.ControlType)}')");
+                break;
+
+            case Action.SetGridValue a:
+                Call(
+                    output,
+                    pad,
+                    $"setGridCell('{Ir.EscapeTs(a.Grid)}', '{Ir.EscapeTs(a.Column)}', "
+                    + $"{a.Row.ToString(CultureInfo.InvariantCulture)}, {a.Value.ToTs()}, "
+                    + $"'{Ir.EscapeTs(a.ControlType)}')");
+                break;
+
+            case Action.OpenLookup a:
+                Call(output, pad, $"openLookup('{Ir.EscapeTs(a.Control)}')");
+                break;
+
+            case Action.CommitLookup a:
+                Call(output, pad, $"commitLookup('{Ir.EscapeTs(a.Control)}')");
+                break;
+
+            case Action.SelectRow a:
+                Call(
+                    output,
+                    pad,
+                    $"selectRow('{Ir.EscapeTs(a.Grid)}', {a.Row.ToString(CultureInfo.InvariantCulture)})");
+                break;
+
+            case Action.MarkRow a:
+                Call(output, pad, $"markRow('{Ir.EscapeTs(a.Grid)}')");
+                break;
+
+            case Action.OpenRow a:
+                Call(output, pad, $"openRow('{Ir.EscapeTs(a.Grid)}')");
+                break;
+
+            case Action.Filter a:
+                Call(
+                    output,
+                    pad,
+                    $"filter('{Ir.EscapeTs(a.Control)}', '{Ir.EscapeTs(a.Field)}', "
+                    + $"'{Ir.EscapeTs(a.Label)}', '{Ir.EscapeTs(a.Operator)}', {a.Value.ToTs()})");
+                break;
+
+            case Action.SelectTreeItem a:
+                Call(output, pad, $"selectTreeItem('{Ir.EscapeTs(a.Control)}', {a.Path.ToTs()})");
+                break;
+
+            case Action.Shortcut a:
+                Call(output, pad, $"shortcut('{Ir.EscapeTs(a.Name)}')");
+                break;
+
+            case Action.CloseForm:
+                Call(output, pad, "closeForm()");
+                break;
+
+            case Action.Validate a:
+                Call(output, pad, $"expectValue('{Ir.EscapeTs(a.Control)}', {a.Expected.ToTs()})");
+                break;
+
+            case Action.Marker a:
+                Line(output, pad, $"// {Ir.CommentSafe(a.Text)}");
+                break;
+
+            // Understood and deliberately not replayed. It still leaves a trace
+            // in the generated file: a step that vanishes without a word is
+            // indistinguishable from one the converter never saw.
+            case Action.Skipped a:
+                Line(output, pad, $"// rsat2pw: skipped '{Ir.CommentSafe(a.RawKind)}' - {Ir.CommentSafe(a.Detail)}");
                 break;
 
             case Action.Unsupported a:
@@ -224,6 +270,9 @@ public static class Codegen
                 throw new InvalidOperationException($"unhandled action {action.GetType().Name}");
         }
     }
+
+    private static void Call(StringBuilder output, string pad, string expression) =>
+        Line(output, pad, $"await d365.{expression};");
 
     private static void Line(StringBuilder output, string pad, string text)
     {

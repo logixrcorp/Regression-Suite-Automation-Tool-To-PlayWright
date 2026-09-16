@@ -3,11 +3,34 @@ using System.Text;
 
 namespace Rsat2Pw;
 
+/// <summary>
+/// An <c>&lt;Annotation i:type="..."&gt;</c> hanging off a node. Kept out of
+/// the property bag on purpose: a <c>FormAnnotation</c> carries
+/// <c>MenuItemName</c>, and flattening that in would turn an ordinary click
+/// into a navigation.
+/// </summary>
+public sealed class RecAnnotation
+{
+    public required string Kind { get; init; }
+
+    public SortedDictionary<string, string> Props { get; } = new(StringComparer.Ordinal);
+}
+
 public sealed class RecNode
 {
     public required string Kind { get; init; }
 
     public SortedDictionary<string, string> Props { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// <c>&lt;Arguments&gt;&lt;CommandArgument&gt;&lt;Value&gt;</c> in order.
+    /// These stay out of the property bag because a command argument is
+    /// positional data (often a JSON blob), not a property called "Value" -
+    /// and letting one in makes a filter command look exactly like a field edit.
+    /// </summary>
+    public List<string> Args { get; } = [];
+
+    public List<RecAnnotation> Annotations { get; } = [];
 
     public List<RecNode> Children { get; } = [];
 
@@ -29,6 +52,12 @@ public sealed class RecNode
 
     public bool HasProp(params string[] names) => Prop(names) is not null;
 
+    /// <summary>A property that reads as a boolean <c>true</c>.</summary>
+    public bool Flag(string name) =>
+        Prop(name) is { } value && string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
+
+    public string? Arg(int index) => index >= 0 && index < Args.Count ? Args[index] : null;
+
     public string Describe()
     {
         var parts = Props
@@ -49,10 +78,21 @@ public sealed class Recording
     public List<RecNode> Nodes { get; init; } = [];
 }
 
+/// <summary>
+/// Reads an <c>.axtr</c> archive (or a bare recording <c>.xml</c>) into a loose
+/// node tree. Mirrors <c>src/recording.rs</c>.
+///
+/// A Task Recorder export is a <c>DataContract</c> serialization of
+/// <c>Microsoft.Dynamics.Client.ServerForm.TaskRecording</c>. Two details are
+/// load-bearing: the action tree hangs off <c>RootScope</c> rather than a
+/// top-level <c>Nodes</c>, and <c>UserActions</c> is a list of <c>z:Ref</c>
+/// pointers into that same tree - so treating it as a second action list
+/// yields a recording made entirely of empty nodes.
+/// </summary>
 public static class RecordingReader
 {
     private static readonly string[] ChildWrappers =
-        ["Childs", "Children", "Nodes", "ChildNodes", "Steps"];
+        ["Children", "Childs", "Nodes", "ChildNodes", "Steps"];
 
     private static readonly string[] NodeElements =
     [
@@ -61,6 +101,24 @@ public static class RecordingReader
         "UserAction",
         "TaskUserActionNode",
         "AxTaskRecordingUserActionNode",
+    ];
+
+    /// <summary>
+    /// Elements that look node-ish by name but are not actions.
+    /// <c>UserActions</c> is the dangerous one: it matches every loose
+    /// "contains UserAction" test.
+    /// </summary>
+    private static readonly string[] NotNodeElements =
+    [
+        "UserActions",
+        "Annotations",
+        "Annotation",
+        "Arguments",
+        "CommandArgument",
+        "FormContexts",
+        "NavigationPath",
+        "Variables",
+        "CanonicalUserAction",
     ];
 
     public static Recording Load(string path)
@@ -126,15 +184,14 @@ public static class RecordingReader
     {
         var doc = Xml.Parse(xmlText);
 
-        var name = doc.TextOf("Name") ?? doc.TextOf("RecordingName") ?? "Recording";
+        var name = doc.TextOf("Name")
+            ?? doc.TextOf("Description")
+            ?? doc.TextOf("RecordingName")
+            ?? "Recording";
 
         var variables = CollectVariables(doc);
 
-        var rootContainer = ChildWrappers
-            .Select(doc.Child)
-            .FirstOrDefault(c => c is not null) ?? doc;
-
-        var nodes = rootContainer.Children
+        var nodes = ActionContainer(doc).Children
             .Where(IsNodeElement)
             .Select(NodeFrom)
             .ToList();
@@ -147,8 +204,29 @@ public static class RecordingReader
         };
     }
 
+    /// <summary>
+    /// Find the element whose children are the recording's top-level actions.
+    /// </summary>
+    private static Element ActionContainer(Element doc)
+    {
+        // The real export: `<RootScope><Children>`. RootScope is itself a scope
+        // node, so its own `Children` is the action list.
+        var rootScope = doc.Child("RootScope");
+        if (rootScope is not null)
+        {
+            return ChildWrappers.Select(rootScope.Child).FirstOrDefault(c => c is not null) ?? rootScope;
+        }
+
+        return ChildWrappers.Select(doc.Child).FirstOrDefault(c => c is not null) ?? doc;
+    }
+
     private static bool IsNodeElement(Element element)
     {
+        if (NotNodeElements.Any(n => string.Equals(element.Name, n, StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+
         if (NodeElements.Any(n => string.Equals(element.Name, n, StringComparison.OrdinalIgnoreCase)))
         {
             return true;
@@ -156,7 +234,7 @@ public static class RecordingReader
 
         var lower = element.Name.ToLowerInvariant();
         return lower.Contains("node", StringComparison.Ordinal)
-            || lower.Contains("useraction", StringComparison.Ordinal);
+            || lower.EndsWith("useraction", StringComparison.Ordinal);
     }
 
     private static RecNode NodeFrom(Element element)
@@ -189,6 +267,20 @@ public static class RecordingReader
                     }
                 }
             }
+            else if (string.Equals(child.Name, "Arguments", StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (var arg in child.ChildrenNamed("CommandArgument"))
+                {
+                    target.Args.Add(arg.TextOf("Value") ?? "");
+                }
+            }
+            else if (string.Equals(child.Name, "Annotations", StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (var annotation in child.ChildrenNamed("Annotation"))
+                {
+                    target.Annotations.Add(AnnotationFrom(annotation));
+                }
+            }
             else if (IsNodeElement(child) && !child.IsScalar)
             {
                 target.Children.Add(NodeFrom(child));
@@ -201,31 +293,66 @@ public static class RecordingReader
                     target.Props.TryAdd(child.Name, text);
                 }
             }
-            else
+            else if (!NotNodeElements.Any(n => string.Equals(child.Name, n, StringComparison.OrdinalIgnoreCase)))
             {
+                // An unrecognized grouping element: keep descending so we do
+                // not silently lose the actions underneath it.
                 Flatten(child, target);
             }
         }
     }
 
+    private static RecAnnotation AnnotationFrom(Element element)
+    {
+        var annotation = new RecAnnotation { Kind = element.Attr("type") ?? element.Name };
+
+        foreach (var child in element.Children)
+        {
+            if (!child.IsScalar)
+            {
+                continue;
+            }
+
+            var text = child.Text.Trim();
+            if (text.Length > 0)
+            {
+                annotation.Props[child.Name] = text;
+            }
+        }
+
+        return annotation;
+    }
+
+    /// <summary>
+    /// Variables in document order - the same order the Rust implementation
+    /// produces, since the two are held to byte-identical output.
+    /// </summary>
     private static List<KeyValuePair<string, string>> CollectVariables(Element doc)
     {
         var found = new List<KeyValuePair<string, string>>();
 
+        void Visit(Element element)
+        {
+            var name = element.TextOf("Name")
+                ?? element.TextOf("VariableName")
+                ?? element.Attr("Name");
+
+            if (name is null)
+            {
+                return;
+            }
+
+            var value = element.TextOf("Value") ?? element.TextOf("DefaultValue") ?? "";
+            found.Add(new KeyValuePair<string, string>(name, value));
+        }
+
         void Walk(Element element)
         {
-            var lower = element.Name.ToLowerInvariant();
-            if (lower.Contains("variable", StringComparison.Ordinal)
-                && !lower.EndsWith("variables", StringComparison.Ordinal))
+            if (string.Equals(element.Name, "Variables", StringComparison.OrdinalIgnoreCase))
             {
-                var name = element.TextOf("Name")
-                    ?? element.TextOf("VariableName")
-                    ?? element.Attr("Name");
-
-                if (name is not null)
+                foreach (var child in element.Children)
                 {
-                    var value = element.TextOf("Value") ?? element.TextOf("DefaultValue") ?? "";
-                    found.Add(new KeyValuePair<string, string>(name, value));
+                    Visit(child);
                 }
 
                 return;
@@ -238,22 +365,6 @@ public static class RecordingReader
         }
 
         Walk(doc);
-
-        found.Sort(static (a, b) =>
-        {
-            var byName = string.CompareOrdinal(a.Key, b.Key);
-            return byName != 0 ? byName : string.CompareOrdinal(a.Value, b.Value);
-        });
-
-        var deduped = new List<KeyValuePair<string, string>>();
-        foreach (var entry in found)
-        {
-            if (deduped.Count == 0 || deduped[^1].Key != entry.Key)
-            {
-                deduped.Add(entry);
-            }
-        }
-
-        return deduped;
+        return found;
     }
 }

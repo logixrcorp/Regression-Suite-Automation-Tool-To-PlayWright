@@ -1,0 +1,596 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Conversion fixture: a Task Recorder recording in the shape a real export
+  actually has.
+
+  Structure and vocabulary are taken from real `.axtr` exports: the
+  `Microsoft.Dynamics.Client.ServerForm.TaskRecording` data contract, the
+  action tree under <RootScope><Children>, the `z:Id` / `z:Ref` object-graph
+  attributes, the <UserActions> list of back-references, and the five node
+  kinds the recorder emits - Scope, MenuItemUserAction, CommandUserAction,
+  PropertyUserAction, TaskUserAction - plus InfoUserAction for a recorded note.
+
+  The *content* is synthetic. It is written to cover the cases that matter:
+  menu-item navigation, a filter whose value hides in a JSON command argument,
+  grid row selection and drill-in, an action-pane tab, a form scope, a lookup
+  (open / select / commit), a tree lookup, a named client shortcut, field entry
+  across several control types, a grid cell edit, a recorded note, a sub-task
+  marker, one client-internal action that is deliberately skipped, and one
+  unknown command to exercise the escape hatch.
+
+  It has NOT been replayed against a live environment. See the README.
+-->
+<Recording xmlns:i="http://www.w3.org/2001/XMLSchema-instance"
+           xmlns="http://schemas.datacontract.org/2004/07/Microsoft.Dynamics.Client.ServerForm.TaskRecording">
+  <CanonicalId>3f2b7c10-0000-4a00-9000-rsat2pwfixture</CanonicalId>
+  <CurrentSequence>64</CurrentSequence>
+  <Description>Confirm purchase order</Description>
+  <Name>Confirm purchase order</Name>
+  <RootScope z:Id="i1" xmlns:z="http://schemas.microsoft.com/2003/10/Serialization/">
+    <CustomDescription i:nil="true" />
+    <Description i:nil="true" />
+    <Id>rsat2pw-fixture-root</Id>
+    <Parent i:nil="true" />
+    <ParentSequence>0</ParentSequence>
+    <ScreenshotUri i:nil="true" />
+    <Sequence>0</Sequence>
+    <Children>
+
+      <!-- ============================================================
+           Step group: find the order
+           ============================================================ -->
+      <Node z:Id="i2" i:type="Scope">
+        <CustomDescription i:nil="true" />
+        <Description>Find the purchase order</Description>
+        <Id>rsat2pw-fixture-find</Id>
+        <Parent z:Ref="i1" />
+        <ParentSequence>0</ParentSequence>
+        <Sequence>2</Sequence>
+        <Children>
+
+          <Node z:Id="i3" i:type="MenuItemUserAction">
+            <Description>Go to Procurement and sourcing &gt; Purchase orders &gt; All purchase orders.</Description>
+            <Parent z:Ref="i2" />
+            <Sequence>3</Sequence>
+            <Annotations />
+            <SystemGenerated>false</SystemGenerated>
+            <MenuItemName>PurchTableListPage</MenuItemName>
+            <MenuItemType>Display</MenuItemType>
+            <NavigationPath xmlns:d7p1="http://schemas.microsoft.com/2003/10/Serialization/Arrays">
+              <d7p1:string>mainmenu</d7p1:string>
+              <d7p1:string>ProcurementAndSourcing</d7p1:string>
+            </NavigationPath>
+          </Node>
+
+          <Node z:Id="i4" i:type="Scope">
+            <Description></Description>
+            <Id>rsat2pw-fixture-purchtable</Id>
+            <Parent z:Ref="i2" />
+            <Sequence>4</Sequence>
+            <Children>
+
+              <!-- A private plumbing scope: the client wraps one of these
+                   around every internal call. It carries no user intent, so
+                   lowering lifts its children out. -->
+              <Node z:Id="i5" i:type="Scope">
+                <Description></Description>
+                <Id>SystemDefinedFilterManager_GetFilters</Id>
+                <Parent z:Ref="i4" />
+                <Sequence>5</Sequence>
+                <Children>
+                  <Node z:Id="i6" i:type="CommandUserAction">
+                    <Description>Open the Purchase order column filter.</Description>
+                    <Parent z:Ref="i5" />
+                    <Sequence>6</Sequence>
+                    <Annotations />
+                    <ControlLabel></ControlLabel>
+                    <FormId>rsat2pw-fixture-purchtable</FormId>
+                    <ListContext i:nil="true" />
+                    <RowIndex i:nil="true" />
+                    <Arguments>
+                      <CommandArgument>
+                        <IsReference>false</IsReference>
+                        <Value>[{"Capability":null,"DataSourceName":"","FieldName":"PurchId","Operator":"Matches","Values":[""],"Version":2}]</Value>
+                      </CommandArgument>
+                    </Arguments>
+                    <CommandName>GetFilters</CommandName>
+                    <ControlName>SystemDefinedFilterManager</ControlName>
+                    <ControlType>FilterManager</ControlType>
+                    <ReturnType>Void</ReturnType>
+                  </Node>
+                </Children>
+                <IsForm>false</IsForm>
+                <IsStepGroup>false</IsStepGroup>
+                <Name>SystemDefinedFilterManager_GetFilters</Name>
+                <ScopeType>Private</ScopeType>
+              </Node>
+
+              <Node z:Id="i7" i:type="Scope">
+                <Description></Description>
+                <Id>SystemDefinedFilterManager_ApplyFiltersForTaskRecorder</Id>
+                <Parent z:Ref="i4" />
+                <Sequence>7</Sequence>
+                <Children>
+                  <Node z:Id="i8" i:type="CommandUserAction">
+                    <Description>Enter a filter value of "000123" on the "Purchase order" field using the "is exactly" filter operator.</Description>
+                    <Parent z:Ref="i7" />
+                    <Sequence>8</Sequence>
+                    <Annotations />
+                    <ControlLabel></ControlLabel>
+                    <ListContext i:nil="true" />
+                    <RowIndex i:nil="true" />
+                    <Arguments>
+                      <CommandArgument>
+                        <IsReference>false</IsReference>
+                        <Value>[{"Capability":{"DisplayDataType":"String","FieldLabel":"Purchase order","FieldName":"","ShowLookup":false,"TableId":0,"Version":2},"DataSourceName":"PurchTable","FieldName":"PurchId","FormDataSourceName":"PurchTable","IsQueryFilter":"Yes","Operator":"Is","Values":["000123"],"Version":2}]</Value>
+                      </CommandArgument>
+                      <CommandArgument>
+                        <IsReference>false</IsReference>
+                        <Value>1</Value>
+                      </CommandArgument>
+                    </Arguments>
+                    <CommandName>ApplyFiltersForTaskRecorder</CommandName>
+                    <ControlName>SystemDefinedFilterManager</ControlName>
+                    <ControlType>FilterManager</ControlType>
+                    <ReturnType>Void</ReturnType>
+                  </Node>
+                </Children>
+                <IsForm>false</IsForm>
+                <IsStepGroup>false</IsStepGroup>
+                <Name>SystemDefinedFilterManager_ApplyFiltersForTaskRecorder</Name>
+                <ScopeType>Private</ScopeType>
+              </Node>
+
+              <Node z:Id="i9" i:type="CommandUserAction">
+                <Description>In the list, find and select the desired record.</Description>
+                <Parent z:Ref="i4" />
+                <Sequence>9</Sequence>
+                <Annotations />
+                <ControlLabel></ControlLabel>
+                <ListContext>Grid</ListContext>
+                <RowIndex i:nil="true" />
+                <Arguments>
+                  <CommandArgument><IsReference>false</IsReference><Value>2</Value></CommandArgument>
+                  <CommandArgument><IsReference>false</IsReference><Value>0</Value></CommandArgument>
+                </Arguments>
+                <CommandName>ChangeSelectedIndexInCache</CommandName>
+                <ControlName>Grid</ControlName>
+                <ControlType>Grid</ControlType>
+                <ReturnType>Void</ReturnType>
+              </Node>
+
+              <Node z:Id="i10" i:type="CommandUserAction">
+                <Description>In the list, click the link in the selected row.</Description>
+                <Parent z:Ref="i4" />
+                <Sequence>10</Sequence>
+                <Annotations />
+                <ListContext>Grid</ListContext>
+                <RowIndex i:nil="true" />
+                <Arguments />
+                <CommandName>NavigationAction</CommandName>
+                <ControlName>Grid</ControlName>
+                <ControlType>Grid</ControlType>
+                <ReturnType>Void</ReturnType>
+              </Node>
+
+            </Children>
+            <IsForm>true</IsForm>
+            <IsStepGroup>false</IsStepGroup>
+            <Name>PurchTable</Name>
+            <ScopeType>Public</ScopeType>
+          </Node>
+
+        </Children>
+        <IsForm>false</IsForm>
+        <IsStepGroup>true</IsStepGroup>
+        <Name>Find the purchase order</Name>
+        <ScopeType>Public</ScopeType>
+      </Node>
+
+      <!-- ============================================================
+           Step group: check the delivery details
+           ============================================================ -->
+      <Node z:Id="i11" i:type="Scope">
+        <CustomDescription i:nil="true" />
+        <Description>Check the delivery details</Description>
+        <Id>rsat2pw-fixture-delivery</Id>
+        <Parent z:Ref="i1" />
+        <Sequence>20</Sequence>
+        <Children>
+
+          <!-- The Task Recorder pane is a form as far as the client is
+               concerned. Its scope is dropped and its children kept. -->
+          <Node z:Id="i12" i:type="Scope">
+            <Description></Description>
+            <Id>rsat2pw-fixture-bpm</Id>
+            <Parent z:Ref="i11" />
+            <Sequence>21</Sequence>
+            <Children>
+              <Node z:Id="i13b" i:type="InfoUserAction">
+                <Description>Note added while recording.</Description>
+                <Parent z:Ref="i12" />
+                <Sequence>21</Sequence>
+                <Annotations />
+                <Notes>The delivery date must fall inside the open period.</Notes>
+                <Text>Check the open period</Text>
+              </Node>
+
+              <Node z:Id="i13" i:type="TaskUserAction">
+                <Description>Sub-task: Delivery details.</Description>
+                <Parent z:Ref="i12" />
+                <Sequence>22</Sequence>
+                <Annotations />
+                <Comment></Comment>
+                <Name>Delivery details</Name>
+                <TaskId>rsat2pw-fixture-subtask</TaskId>
+                <UserActionType>Begin</UserActionType>
+              </Node>
+            </Children>
+            <IsForm>true</IsForm>
+            <IsStepGroup>false</IsStepGroup>
+            <Name>SysBPMPane</Name>
+            <ScopeType>Public</ScopeType>
+          </Node>
+
+          <Node z:Id="i14" i:type="Scope">
+            <Description></Description>
+            <Id>rsat2pw-fixture-purchtable-detail</Id>
+            <Parent z:Ref="i11" />
+            <Sequence>23</Sequence>
+            <Children>
+
+              <Node z:Id="i14b" i:type="CommandUserAction">
+                <Description>Use the shortcut for switching to View or Edit mode.</Description>
+                <Parent z:Ref="i14" />
+                <Sequence>23</Sequence>
+                <Annotations />
+                <ControlLabel></ControlLabel>
+                <ListContext i:nil="true" />
+                <RowIndex i:nil="true" />
+                <Arguments>
+                  <CommandArgument><IsReference>false</IsReference><Value>ViewEdit</Value></CommandArgument>
+                </Arguments>
+                <CommandName>ExecuteShortcuts</CommandName>
+                <ControlName></ControlName>
+                <ControlType></ControlType>
+                <ReturnType>Void</ReturnType>
+              </Node>
+
+              <Node z:Id="i15" i:type="CommandUserAction">
+                <Description>On the Action Pane, click Purchase.</Description>
+                <Parent z:Ref="i14" />
+                <Sequence>24</Sequence>
+                <Annotations />
+                <ControlLabel>Purchase</ControlLabel>
+                <ListContext i:nil="true" />
+                <RowIndex i:nil="true" />
+                <Arguments />
+                <CommandName>TabShown</CommandName>
+                <ControlName>PurchaseTab</ControlName>
+                <ControlType>AppBarTab</ControlType>
+                <ReturnType>Void</ReturnType>
+              </Node>
+
+              <Node z:Id="i16" i:type="PropertyUserAction">
+                <Description>In the Delivery date field, enter a date.</Description>
+                <Parent z:Ref="i14" />
+                <Sequence>25</Sequence>
+                <Annotations />
+                <ControlLabel>Delivery date</ControlLabel>
+                <ControlLabelId>@SYS14926</ControlLabelId>
+                <ListContext i:nil="true" />
+                <RowIndex i:nil="true" />
+                <BoundDataSource>PurchTable</BoundDataSource>
+                <BoundProperty>DeliveryDate</BoundProperty>
+                <ControlName>PurchTable_DeliveryDate</ControlName>
+                <ControlType>Date</ControlType>
+                <IsReference>false</IsReference>
+                <PropertyName>Value</PropertyName>
+                <UserActionType>Input</UserActionType>
+                <Value>9/30/2026</Value>
+              </Node>
+
+              <Node z:Id="i17" i:type="CommandUserAction">
+                <Description>In the Mode of delivery field, enter or select a value.</Description>
+                <Parent z:Ref="i14" />
+                <Sequence>26</Sequence>
+                <Annotations />
+                <ControlLabel>Mode of delivery</ControlLabel>
+                <ListContext i:nil="true" />
+                <RowIndex i:nil="true" />
+                <Arguments />
+                <CommandName>RequestPopup</CommandName>
+                <ControlName>PurchTable_DlvMode</ControlName>
+                <ControlType>Input</ControlType>
+                <ReturnType>Void</ReturnType>
+              </Node>
+
+              <Node z:Id="i18" i:type="Scope">
+                <Description></Description>
+                <Id>rsat2pw-fixture-dlvmode-lookup</Id>
+                <Parent z:Ref="i14" />
+                <Sequence>27</Sequence>
+                <Children>
+                  <Node z:Id="i19" i:type="CommandUserAction">
+                    <Description>In the list, find and select the desired record.</Description>
+                    <Parent z:Ref="i18" />
+                    <Sequence>28</Sequence>
+                    <Annotations />
+                    <ListContext>LookupGrid</ListContext>
+                    <RowIndex i:nil="true" />
+                    <Arguments>
+                      <CommandArgument><IsReference>false</IsReference><Value>1</Value></CommandArgument>
+                    </Arguments>
+                    <CommandName>ChangeSelectedIndexInCache</CommandName>
+                    <ControlName>LookupGrid</ControlName>
+                    <ControlType>Grid</ControlType>
+                    <ReturnType>Void</ReturnType>
+                  </Node>
+                </Children>
+                <IsForm>true</IsForm>
+                <IsStepGroup>false</IsStepGroup>
+                <Name>PurchTable_DlvMode_Lookup</Name>
+                <ScopeType>Private</ScopeType>
+              </Node>
+
+              <Node z:Id="i20" i:type="CommandUserAction">
+                <Description>Commit the Mode of delivery selection.</Description>
+                <Parent z:Ref="i14" />
+                <Sequence>29</Sequence>
+                <Annotations />
+                <ControlLabel>Mode of delivery</ControlLabel>
+                <ListContext i:nil="true" />
+                <RowIndex i:nil="true" />
+                <Arguments />
+                <CommandName>ResolveChanges</CommandName>
+                <ControlName>PurchTable_DlvMode</ControlName>
+                <ControlType>ReferenceGroup</ControlType>
+                <ReturnType>Void</ReturnType>
+              </Node>
+
+              <Node z:Id="i21" i:type="PropertyUserAction">
+                <Description>In the Quantity field on line 1, enter a number.</Description>
+                <Parent z:Ref="i14" />
+                <Sequence>30</Sequence>
+                <Annotations />
+                <ControlLabel>Quantity</ControlLabel>
+                <ListContext>PurchLineGrid</ListContext>
+                <RowIndex>0</RowIndex>
+                <BoundDataSource>PurchLine</BoundDataSource>
+                <BoundProperty>PurchQty</BoundProperty>
+                <ControlName>PurchLine_PurchQty</ControlName>
+                <ControlType>Real</ControlType>
+                <IsReference>false</IsReference>
+                <PropertyName>Value</PropertyName>
+                <UserActionType>Input</UserActionType>
+                <Value>12</Value>
+              </Node>
+
+              <Node z:Id="i22" i:type="PropertyUserAction">
+                <Description>Select the Print confirmation check box.</Description>
+                <Parent z:Ref="i14" />
+                <Sequence>31</Sequence>
+                <Annotations />
+                <ControlLabel>Print confirmation</ControlLabel>
+                <ListContext i:nil="true" />
+                <RowIndex i:nil="true" />
+                <ControlName>PurchParmTable_Printout</ControlName>
+                <ControlType>CheckBox</ControlType>
+                <IsReference>false</IsReference>
+                <PropertyName>Value</PropertyName>
+                <UserActionType>Input</UserActionType>
+                <Value>true</Value>
+              </Node>
+
+            </Children>
+            <IsForm>true</IsForm>
+            <IsStepGroup>false</IsStepGroup>
+            <Name>PurchTable</Name>
+            <ScopeType>Public</ScopeType>
+          </Node>
+
+        </Children>
+        <IsForm>false</IsForm>
+        <IsStepGroup>true</IsStepGroup>
+        <Name>Check the delivery details</Name>
+        <ScopeType>Public</ScopeType>
+      </Node>
+
+      <!-- ============================================================
+           Step group: set the procurement category (a tree lookup)
+           ============================================================ -->
+      <Node z:Id="i30" i:type="Scope">
+        <CustomDescription i:nil="true" />
+        <Description>Set the procurement category</Description>
+        <Id>rsat2pw-fixture-category</Id>
+        <Parent z:Ref="i1" />
+        <Sequence>33</Sequence>
+        <Children>
+          <Node z:Id="i31" i:type="Scope">
+            <Description></Description>
+            <Id>rsat2pw-fixture-category-form</Id>
+            <Parent z:Ref="i30" />
+            <Sequence>34</Sequence>
+            <Children>
+
+              <Node z:Id="i32" i:type="CommandUserAction">
+                <Description>In the Procurement category field, enter or select a value.</Description>
+                <Parent z:Ref="i31" />
+                <Sequence>35</Sequence>
+                <Annotations />
+                <ControlLabel>Procurement category</ControlLabel>
+                <ListContext i:nil="true" />
+                <RowIndex i:nil="true" />
+                <Arguments />
+                <CommandName>RequestPopup</CommandName>
+                <ControlName>PurchLine_ProcurementCategory</ControlName>
+                <ControlType>Input</ControlType>
+                <ReturnType>Void</ReturnType>
+              </Node>
+
+              <Node z:Id="i33" i:type="Scope">
+                <Description></Description>
+                <Id>rsat2pw-fixture-category-lookup</Id>
+                <Parent z:Ref="i31" />
+                <Sequence>36</Sequence>
+                <Children>
+                  <Node z:Id="i34" i:type="CommandUserAction">
+                    <Description>In the tree, select 'ALL (ALL)\Office supplies (Office supplies)'.</Description>
+                    <Parent z:Ref="i33" />
+                    <Sequence>37</Sequence>
+                    <Annotations />
+                    <ControlLabel></ControlLabel>
+                    <ListContext i:nil="true" />
+                    <RowIndex i:nil="true" />
+                    <Arguments>
+                      <CommandArgument><IsReference>false</IsReference><Value>ALL (ALL)\Office supplies (Office supplies)</Value></CommandArgument>
+                      <CommandArgument><IsReference>false</IsReference><Value>1</Value></CommandArgument>
+                    </Arguments>
+                    <CommandName>SelectionPathChanged</CommandName>
+                    <ControlName>ctrlFormTree</ControlName>
+                    <ControlType>Tree</ControlType>
+                    <ReturnType>Void</ReturnType>
+                  </Node>
+                </Children>
+                <IsForm>true</IsForm>
+                <IsStepGroup>false</IsStepGroup>
+                <Name>EcoResCategorySingleLookup</Name>
+                <ScopeType>Private</ScopeType>
+              </Node>
+
+              <Node z:Id="i35" i:type="CommandUserAction">
+                <Description>Commit the Procurement category selection.</Description>
+                <Parent z:Ref="i31" />
+                <Sequence>38</Sequence>
+                <Annotations />
+                <ControlLabel>Procurement category</ControlLabel>
+                <ListContext i:nil="true" />
+                <RowIndex i:nil="true" />
+                <Arguments />
+                <CommandName>ResolveChanges</CommandName>
+                <ControlName>PurchLine_ProcurementCategory</ControlName>
+                <ControlType>ReferenceGroup</ControlType>
+                <ReturnType>Void</ReturnType>
+              </Node>
+
+            </Children>
+            <IsForm>true</IsForm>
+            <IsStepGroup>false</IsStepGroup>
+            <Name>PurchTable</Name>
+            <ScopeType>Public</ScopeType>
+          </Node>
+        </Children>
+        <IsForm>false</IsForm>
+        <IsStepGroup>true</IsStepGroup>
+        <Name>Set the procurement category</Name>
+        <ScopeType>Public</ScopeType>
+      </Node>
+
+      <!-- ============================================================
+           Step group: confirm and close
+           ============================================================ -->
+      <Node z:Id="i23" i:type="Scope">
+        <CustomDescription i:nil="true" />
+        <Description>Confirm the order</Description>
+        <Id>rsat2pw-fixture-confirm</Id>
+        <Parent z:Ref="i1" />
+        <Sequence>40</Sequence>
+        <Children>
+
+          <Node z:Id="i24" i:type="Scope">
+            <Description></Description>
+            <Id>rsat2pw-fixture-purchtable-confirm</Id>
+            <Parent z:Ref="i23" />
+            <Sequence>41</Sequence>
+            <Children>
+
+              <Node z:Id="i25" i:type="CommandUserAction">
+                <Description>Click Confirm.</Description>
+                <Parent z:Ref="i24" />
+                <Sequence>42</Sequence>
+                <Annotations />
+                <ControlLabel>Confirm</ControlLabel>
+                <ListContext i:nil="true" />
+                <RowIndex i:nil="true" />
+                <Arguments />
+                <CommandName>Click</CommandName>
+                <ControlName>PurchFormLetter_PurchOrderJournal</ControlName>
+                <ControlType>MenuItemButton</ControlType>
+                <ReturnType>Void</ReturnType>
+              </Node>
+
+              <!-- No rule for this verb yet: it lands in the report as the
+                   worklist entry `CommandUserAction:SelectForAdd`. -->
+              <Node z:Id="i26" i:type="CommandUserAction">
+                <Description>Select Grid to add a field to it.</Description>
+                <Parent z:Ref="i24" />
+                <Sequence>43</Sequence>
+                <Annotations />
+                <ListContext i:nil="true" />
+                <RowIndex i:nil="true" />
+                <Arguments>
+                  <CommandArgument><IsReference>false</IsReference><Value>SelectForAdd</Value></CommandArgument>
+                </Arguments>
+                <CommandName>SelectForAdd</CommandName>
+                <ControlName>Grid</ControlName>
+                <ControlType>Grid</ControlType>
+                <ReturnType>Void</ReturnType>
+              </Node>
+
+              <Node z:Id="i27" i:type="CommandUserAction">
+                <Description>Click Yes.</Description>
+                <Parent z:Ref="i24" />
+                <Sequence>44</Sequence>
+                <Annotations />
+                <ControlLabel>Yes</ControlLabel>
+                <ListContext i:nil="true" />
+                <RowIndex i:nil="true" />
+                <Arguments />
+                <CommandName>Click</CommandName>
+                <ControlName>Yes</ControlName>
+                <ControlType>CommandButton</ControlType>
+                <ReturnType>Void</ReturnType>
+              </Node>
+
+              <Node z:Id="i28" i:type="CommandUserAction">
+                <Description>Close the page.</Description>
+                <Parent z:Ref="i24" />
+                <Sequence>45</Sequence>
+                <Annotations />
+                <ControlLabel></ControlLabel>
+                <ListContext i:nil="true" />
+                <RowIndex i:nil="true" />
+                <Arguments />
+                <CommandName>RequestClose</CommandName>
+                <ControlName></ControlName>
+                <ControlType></ControlType>
+                <ReturnType>Void</ReturnType>
+              </Node>
+
+            </Children>
+            <IsForm>true</IsForm>
+            <IsStepGroup>false</IsStepGroup>
+            <Name>PurchTable</Name>
+            <ScopeType>Public</ScopeType>
+          </Node>
+
+        </Children>
+        <IsForm>false</IsForm>
+        <IsStepGroup>true</IsStepGroup>
+        <Name>Confirm the order</Name>
+        <ScopeType>Public</ScopeType>
+      </Node>
+
+    </Children>
+  </RootScope>
+
+  <!-- Back-references into the tree above, not a second list of actions. -->
+  <UserActions xmlns:d2p1="http://schemas.microsoft.com/2003/10/Serialization/Arrays">
+    <d2p1:anyType z:Ref="i3" xmlns:z="http://schemas.microsoft.com/2003/10/Serialization/" />
+    <d2p1:anyType z:Ref="i6" xmlns:z="http://schemas.microsoft.com/2003/10/Serialization/" />
+    <d2p1:anyType z:Ref="i8" xmlns:z="http://schemas.microsoft.com/2003/10/Serialization/" />
+    <d2p1:anyType z:Ref="i9" xmlns:z="http://schemas.microsoft.com/2003/10/Serialization/" />
+    <d2p1:anyType z:Ref="i10" xmlns:z="http://schemas.microsoft.com/2003/10/Serialization/" />
+  </UserActions>
+  <Version>1</Version>
+</Recording>

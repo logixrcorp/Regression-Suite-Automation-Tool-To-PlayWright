@@ -132,7 +132,8 @@ internal static class Program
         Console.Error.WriteLine($"recording : {report.Recording}");
         Console.Error.WriteLine(string.Create(
             CultureInfo.InvariantCulture,
-            $"actions   : {c.Actions} ({c.Translated} translated, {c.NotTranslated} not - {c.Percent():F1}%)"));
+            $"actions   : {c.Actions} ({c.Translated} translated, {c.Skipped} skipped, "
+            + $"{c.NotTranslated} not - {c.Percent():F1}%)"));
         Console.Error.WriteLine($"test data : {report.TestCases} case(s) from {report.TestDataSource}");
 
         if (report.TranslatedByOp.Count > 0)
@@ -141,6 +142,15 @@ internal static class Program
             foreach (var (op, n) in report.TranslatedByOp)
             {
                 Console.Error.WriteLine($"  {op,-14} {n,3}");
+            }
+        }
+
+        if (report.SkippedKinds.Count > 0)
+        {
+            Console.Error.WriteLine("\nskipped (client-internal, deliberately not replayed):");
+            foreach (var kind in report.SkippedKinds)
+            {
+                Console.Error.WriteLine($"  {kind.RawKind,-30} {kind.Count,3}");
             }
         }
 

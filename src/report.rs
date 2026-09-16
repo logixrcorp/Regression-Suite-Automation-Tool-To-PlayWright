@@ -15,6 +15,10 @@ use std::collections::BTreeMap;
 pub struct Coverage {
     pub actions: usize,
     pub translated: usize,
+    /// Understood, and deliberately not replayed. Counted apart from
+    /// `translated` so the headline percentage cannot be inflated by deciding
+    /// that more and more of the recording does not matter.
+    pub skipped: usize,
     pub not_translated: usize,
 }
 
@@ -57,6 +61,7 @@ pub struct OutlineEntry {
     pub op: String,
     pub detail: String,
     pub translated: bool,
+    pub skipped: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -65,6 +70,7 @@ pub struct Report {
     pub coverage: Coverage,
     /// Emitted runtime call -> how many times, for the actions we did map.
     pub translated_by_op: BTreeMap<String, usize>,
+    pub skipped_kinds: Vec<UnmappedKind>,
     pub not_translated: Vec<UnmappedKind>,
     pub variables: Vec<VariableUse>,
     pub test_cases: usize,
@@ -75,6 +81,7 @@ pub struct Report {
 pub fn build(case: &TestCase, cases: &Cases) -> Report {
     let mut translated_by_op: BTreeMap<String, usize> = BTreeMap::new();
     let mut unmapped: BTreeMap<String, UnmappedKind> = BTreeMap::new();
+    let mut skipped: BTreeMap<String, UnmappedKind> = BTreeMap::new();
     let mut outline = Vec::new();
 
     walk(
@@ -82,10 +89,12 @@ pub fn build(case: &TestCase, cases: &Cases) -> Report {
         0,
         &mut translated_by_op,
         &mut unmapped,
+        &mut skipped,
         &mut outline,
     );
 
     let not_translated: usize = unmapped.values().map(|u| u.count).sum();
+    let skipped_count: usize = skipped.values().map(|u| u.count).sum();
     let actions = case.action_count();
 
     let referenced = referenced_variables(&case.actions);
@@ -104,10 +113,14 @@ pub fn build(case: &TestCase, cases: &Cases) -> Report {
         recording: case.name.clone(),
         coverage: Coverage {
             actions,
-            translated: actions.saturating_sub(not_translated),
+            translated: actions
+                .saturating_sub(not_translated)
+                .saturating_sub(skipped_count),
+            skipped: skipped_count,
             not_translated,
         },
         translated_by_op,
+        skipped_kinds: skipped.into_values().collect(),
         not_translated: unmapped.into_values().collect(),
         variables,
         test_cases: cases.rows.len(),
@@ -121,42 +134,53 @@ fn walk(
     depth: usize,
     by_op: &mut BTreeMap<String, usize>,
     unmapped: &mut BTreeMap<String, UnmappedKind>,
+    skipped: &mut BTreeMap<String, UnmappedKind>,
     outline: &mut Vec<OutlineEntry>,
 ) {
     for action in actions {
-        let translated = !matches!(action, Action::Unsupported { .. });
+        let is_skipped = matches!(action, Action::Skipped { .. });
+        let translated = !matches!(action, Action::Unsupported { .. }) && !is_skipped;
 
         outline.push(OutlineEntry {
             depth,
             op: action.op_name().to_string(),
             detail: action.summary(),
             translated,
+            skipped: is_skipped,
         });
 
         match action {
             Action::Unsupported {
                 raw_kind, props, ..
-            } => {
-                let entry = unmapped
-                    .entry(raw_kind.clone())
-                    .or_insert_with(|| UnmappedKind {
-                        raw_kind: raw_kind.clone(),
-                        count: 0,
-                        props: BTreeMap::new(),
-                    });
-                entry.count += 1;
-                for (k, v) in props {
-                    // First example value wins; later occurrences only widen
-                    // the key set.
-                    entry.props.entry(k.clone()).or_insert_with(|| v.clone());
-                }
-            }
+            } => record(unmapped, raw_kind, props),
+            Action::Skipped {
+                raw_kind, props, ..
+            } => record(skipped, raw_kind, props),
             _ => {
                 *by_op.entry(action.op_name().to_string()).or_insert(0) += 1;
             }
         }
 
-        walk(action.children(), depth + 1, by_op, unmapped, outline);
+        walk(action.children(), depth + 1, by_op, unmapped, skipped, outline);
+    }
+}
+
+fn record(
+    into: &mut BTreeMap<String, UnmappedKind>,
+    raw_kind: &str,
+    props: &BTreeMap<String, String>,
+) {
+    let entry = into
+        .entry(raw_kind.to_string())
+        .or_insert_with(|| UnmappedKind {
+            raw_kind: raw_kind.to_string(),
+            count: 0,
+            props: BTreeMap::new(),
+        });
+    entry.count += 1;
+    for (k, v) in props {
+        // First example value wins; later occurrences only widen the key set.
+        entry.props.entry(k.clone()).or_insert_with(|| v.clone());
     }
 }
 
@@ -177,7 +201,7 @@ fn referenced_variables(actions: &[Action]) -> Vec<String> {
             match action {
                 Action::SetValue { value, .. }
                 | Action::SetGridValue { value, .. }
-                | Action::Lookup { value, .. } => note(value, out),
+                | Action::Filter { value, .. } => note(value, out),
                 Action::Validate { expected, .. } => note(expected, out),
                 _ => {}
             }
@@ -211,6 +235,7 @@ impl Report {
             c.translated,
             c.percent()
         ));
+        s.push_str(&format!("| Skipped | {} |\n", c.skipped));
         s.push_str(&format!("| Not translated | {} |\n", c.not_translated));
         s.push_str(&format!(
             "| Test cases | {} (from {}) |\n\n",
@@ -228,14 +253,22 @@ impl Report {
         } else {
             s.push_str("| Emitted call | Count |\n|---|---:|\n");
             for (op, n) in &self.translated_by_op {
-                // Everything reaching the runtime is a `d365.` method; grouping
-                // constructs like `test.step` come from Playwright itself.
-                let call = if op.contains('.') {
-                    format!("{op}()")
-                } else {
-                    format!("d365.{op}()")
-                };
-                s.push_str(&format!("| `{call}` | {n} |\n"));
+                s.push_str(&format!("| {} | {n} |\n", render_op(op)));
+            }
+            s.push('\n');
+        }
+
+        // -- skipped ----------------------------------------------------
+        if !self.skipped_kinds.is_empty() {
+            s.push_str("## Skipped\n\n");
+            s.push_str(
+                "Recorded, understood, and deliberately not replayed: client-internal \
+                 bookkeeping\nwith no user-visible effect. Each one still leaves a comment \
+                 in the generated spec.\n\n",
+            );
+            s.push_str("| Action | Count |\n|---|---:|\n");
+            for kind in &self.skipped_kinds {
+                s.push_str(&format!("| `{}` | {} |\n", kind.raw_kind, kind.count));
             }
             s.push('\n');
         }
@@ -246,7 +279,7 @@ impl Report {
             s.push_str("_Nothing — full coverage._\n\n");
         } else {
             s.push_str(
-                "Each heading is a Task Recorder action type with no rule in \
+                "Each heading is a Task Recorder action with no rule in \
                  `src/lower.rs`.\nThe properties are everything the recorder \
                  supplied, which is what a new\nmapping rule keys off.\n\n",
             );
@@ -272,7 +305,7 @@ impl Report {
         // -- test data --------------------------------------------------
         s.push_str("## Test data\n\n");
         if self.variables.is_empty() {
-            s.push_str("_The recording declared no variables._\n\n");
+            s.push_str("_The recording captured no input values._\n\n");
         } else {
             s.push_str("| Variable | Used by an action | In test data | Recorded default |\n");
             s.push_str("|---|---|---|---|\n");
@@ -296,20 +329,37 @@ impl Report {
 
         // -- outline ----------------------------------------------------
         s.push_str("## Translation outline\n\n");
-        s.push_str("The recording in order. `!!` marks an action that was not translated.\n\n");
+        s.push_str(
+            "The recording in order. `!!` marks an action that was not translated, \
+             `~~` one\nthat was deliberately skipped.\n\n",
+        );
         s.push_str("```\n");
         for e in &self.outline {
-            s.push_str(&format!(
-                "{}{}{} {}\n",
-                if e.translated { "   " } else { "!! " },
-                "  ".repeat(e.depth),
-                e.op,
-                e.detail,
-            ));
+            let marker = if e.skipped {
+                "~~ "
+            } else if e.translated {
+                "   "
+            } else {
+                "!! "
+            };
+            let line = format!("{}{}{} {}", marker, "  ".repeat(e.depth), e.op, e.detail);
+            s.push_str(line.trim_end());
+            s.push('\n');
         }
         s.push_str("```\n");
 
         s
+    }
+}
+
+/// How an emitted op is named in the report. Everything reaching the runtime
+/// is a `d365.` method; `test.step` comes from Playwright, and a marker is a
+/// comment rather than a call at all.
+fn render_op(op: &str) -> String {
+    match op {
+        "marker" => "a comment".to_string(),
+        _ if op.contains('.') => format!("`{op}()`"),
+        _ => format!("`d365.{op}()`"),
     }
 }
 
@@ -338,49 +388,55 @@ mod tests {
         build(&case, &cases)
     }
 
+    fn wrap(nodes: &str) -> String {
+        format!(
+            r#"<Recording xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+                 <Name>T</Name><RootScope><Children>{nodes}</Children></RootScope></Recording>"#
+        )
+    }
+
     #[test]
-    fn counts_translated_and_unmapped_actions() {
-        let r = report_for(include_str!("../fixtures/CreateCustomer.xml"));
+    fn counts_translated_skipped_and_unmapped_actions() {
+        let r = report_for(include_str!("../fixtures/ConfirmPurchaseOrder.xml"));
 
-        assert_eq!(r.coverage.actions, 18);
-        assert_eq!(r.coverage.not_translated, 1);
-        assert_eq!(r.coverage.translated, 17);
-        assert!((r.coverage.percent() - 94.4).abs() < 0.1);
-
-        assert_eq!(r.translated_by_op.get("setField"), Some(&3));
-        assert_eq!(r.translated_by_op.get("setGridCell"), Some(&2));
-        assert_eq!(r.translated_by_op.get("test.step"), Some(&4));
+        assert_eq!(r.coverage.actions, r.outline.len());
+        assert_eq!(
+            r.coverage.translated + r.coverage.skipped + r.coverage.not_translated,
+            r.coverage.actions
+        );
+        assert!(r.translated_by_op.contains_key("click"));
+        assert!(r.translated_by_op.contains_key("test.step"));
     }
 
     /// The whole point of the report: an unmapped kind must arrive with the
     /// properties needed to write its mapping rule.
     #[test]
     fn unmapped_kinds_carry_their_full_property_bag() {
-        let r = report_for(include_str!("../fixtures/CreateCustomer.xml"));
+        let r = report_for(&wrap(
+            r#"<Node i:type="CommandUserAction"><CommandName>SelectForAdd</CommandName>
+               <ControlName>Grid</ControlName><ControlType>Grid</ControlType></Node>"#,
+        ));
 
         assert_eq!(r.not_translated.len(), 1);
         let kind = &r.not_translated[0];
-        assert_eq!(kind.raw_kind, "ExportToExcelUserAction");
+        assert_eq!(kind.raw_kind, "CommandUserAction:SelectForAdd");
         assert_eq!(kind.count, 1);
         assert_eq!(
             kind.props.get("ControlName").map(String::as_str),
-            Some("ExportToExcelButton")
+            Some("Grid")
         );
         assert_eq!(
-            kind.props.get("OfficeTemplate").map(String::as_str),
-            Some("CustomerV3")
+            kind.props.get("ControlType").map(String::as_str),
+            Some("Grid")
         );
     }
 
     #[test]
     fn repeated_unmapped_kinds_are_grouped_with_a_count() {
-        let r = report_for(
-            r#"<AxTaskRecording xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
-                 <Name>T</Name><Nodes>
-                   <Node i:type="Mystery"><A>1</A></Node>
-                   <Node i:type="Mystery"><B>2</B></Node>
-                 </Nodes></AxTaskRecording>"#,
-        );
+        let r = report_for(&wrap(
+            r#"<Node i:type="Mystery"><A>1</A></Node>
+               <Node i:type="Mystery"><B>2</B></Node>"#,
+        ));
 
         assert_eq!(r.not_translated.len(), 1);
         assert_eq!(r.not_translated[0].count, 2);
@@ -390,19 +446,35 @@ mod tests {
         assert_eq!(r.coverage.translated, 0);
     }
 
+    /// A skipped action is not a translated one. Counting it as translated
+    /// would let the headline number be improved by skipping more.
+    #[test]
+    fn skipped_actions_get_their_own_bucket() {
+        let r = report_for(&wrap(
+            r#"<Node i:type="CommandUserAction"><CommandName>GetFilters</CommandName>
+               <ControlName>SystemDefinedFilterManager</ControlName></Node>"#,
+        ));
+
+        assert_eq!(r.coverage.skipped, 1);
+        assert_eq!(r.coverage.translated, 0);
+        assert_eq!(r.coverage.not_translated, 0);
+        assert_eq!(r.skipped_kinds[0].raw_kind, "CommandUserAction:GetFilters");
+        assert!(r.to_markdown().contains("## Skipped"));
+    }
+
     #[test]
     fn flags_variables_that_no_action_uses() {
         let r = report_for(
-            r#"<AxTaskRecording xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+            r#"<Recording xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
                  <Name>T</Name>
                  <Variables>
                    <AxTaskRecordingVariable><Name>Used</Name><Value>a</Value></AxTaskRecordingVariable>
                    <AxTaskRecordingVariable><Name>Orphan</Name><Value>b</Value></AxTaskRecordingVariable>
                  </Variables>
-                 <Nodes>
-                   <Node i:type="InputUserAction"><ControlName>C</ControlName>
+                 <RootScope><Children>
+                   <Node i:type="PropertyUserAction"><ControlName>C</ControlName>
                      <VariableName>Used</VariableName><Value>a</Value></Node>
-                 </Nodes></AxTaskRecording>"#,
+                 </Children></RootScope></Recording>"#,
         );
 
         let used = r.variables.iter().find(|v| v.name == "Used").unwrap();
@@ -413,25 +485,27 @@ mod tests {
 
     #[test]
     fn outline_nests_children_and_marks_gaps() {
-        let r = report_for(include_str!("../fixtures/CreateCustomer.xml"));
+        let r = report_for(include_str!("../fixtures/ConfirmPurchaseOrder.xml"));
 
         // Steps sit at depth 0, their contents deeper.
         assert!(r.outline.iter().any(|e| e.op == "test.step" && e.depth == 0));
-        assert!(r.outline.iter().any(|e| e.op == "setField" && e.depth == 2));
-        assert_eq!(r.outline.iter().filter(|e| !e.translated).count(), 1);
+        assert!(r.outline.iter().any(|e| e.depth >= 2));
+        assert_eq!(
+            r.outline.iter().filter(|e| !e.translated && !e.skipped).count(),
+            r.coverage.not_translated
+        );
     }
 
     #[test]
     fn markdown_and_json_both_render() {
-        let r = report_for(include_str!("../fixtures/CreateCustomer.xml"));
+        let r = report_for(include_str!("../fixtures/ConfirmPurchaseOrder.xml"));
 
         let md = r.to_markdown();
-        assert!(md.contains("# Conversion report: Create customer"));
-        assert!(md.contains("ExportToExcelUserAction"));
-        assert!(md.contains("| Not translated | 1 |"));
+        assert!(md.contains("# Conversion report: Confirm purchase order"));
+        assert!(md.contains("## Coverage"));
 
         let json: serde_json::Value = serde_json::from_str(&r.to_json().unwrap()).unwrap();
-        assert_eq!(json["coverage"]["not_translated"], 1);
+        assert_eq!(json["coverage"]["actions"], r.coverage.actions);
     }
 
     /// Same contract as the spec's golden test: the committed example report
@@ -440,31 +514,31 @@ mod tests {
     #[test]
     fn checked_in_example_report_matches_current_output() {
         let case = lower::lower(
-            &recording::parse(include_str!("../fixtures/CreateCustomer.xml")).unwrap(),
+            &recording::parse(include_str!("../fixtures/ConfirmPurchaseOrder.xml")).unwrap(),
         );
         // The committed report was generated with the workbook, so its test-data
         // provenance line has to come from there too.
         let cases = params::from_workbook(
-            std::path::Path::new("fixtures/CreateCustomer-params.xlsx"),
+            std::path::Path::new("fixtures/ConfirmPurchaseOrder-params.xlsx"),
             None,
             &case,
         )
         .unwrap();
 
         let generated = build(&case, &cases).to_markdown();
-        let committed = include_str!("../tests/CreateCustomer.report.md");
+        let committed = include_str!("../tests/ConfirmPurchaseOrder.report.md");
 
         assert_eq!(
             generated.replace("\r\n", "\n"),
             committed.replace("\r\n", "\n"),
-            "regenerate with: cargo run -- fixtures/CreateCustomer.axtr --out-dir tests \
-             --params fixtures/CreateCustomer-params.xlsx"
+            "regenerate with: cargo run -- fixtures/ConfirmPurchaseOrder.axtr --out-dir tests \
+             --params fixtures/ConfirmPurchaseOrder-params.xlsx"
         );
     }
 
     #[test]
     fn empty_recording_is_fully_covered_not_zero_percent() {
-        let r = report_for(r#"<AxTaskRecording><Name>T</Name><Nodes/></AxTaskRecording>"#);
+        let r = report_for(r#"<Recording><Name>T</Name><RootScope><Children/></RootScope></Recording>"#);
         assert_eq!(r.coverage.actions, 0);
         assert_eq!(r.coverage.percent(), 100.0);
     }

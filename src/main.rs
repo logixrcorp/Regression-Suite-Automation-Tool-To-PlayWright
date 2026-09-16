@@ -131,9 +131,10 @@ fn print_summary(report: &report::Report) {
 
     eprintln!("recording : {}", report.recording);
     eprintln!(
-        "actions   : {} ({} translated, {} not - {:.1}%)",
+        "actions   : {} ({} translated, {} skipped, {} not - {:.1}%)",
         c.actions,
         c.translated,
+        c.skipped,
         c.not_translated,
         c.percent()
     );
@@ -146,6 +147,14 @@ fn print_summary(report: &report::Report) {
         eprintln!("\ntranslated:");
         for (op, n) in &report.translated_by_op {
             eprintln!("  {op:<14} {n:>3}");
+        }
+    }
+
+    if !report.skipped_kinds.is_empty() {
+        eprintln!("
+skipped (client-internal, deliberately not replayed):");
+        for kind in &report.skipped_kinds {
+            eprintln!("  {:<30} {:>3}", kind.raw_kind, kind.count);
         }
     }
 

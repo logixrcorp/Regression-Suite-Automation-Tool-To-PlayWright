@@ -9,60 +9,152 @@
       position: fixed; inset: 0; background: rgba(0,0,0,.35); color: #fff;
       display: none; align-items: center; justify-content: center; z-index: 999;
     }
-    [role="dialog"] { display: none; border: 1px solid #888; padding: 16px; margin-top: 16px; }
-    .lookupPopup { display: none; border: 1px solid #888; position: absolute; background: #fff; }
-    .lookupRow { padding: 4px 12px; cursor: pointer; }
-    .cell { display: inline-block; margin-right: 8px; }
+    .hidden { display: none; }
+    .appBar { display: flex; gap: 8px; margin: 12px 0; }
+    .columnHeader { font-weight: 600; cursor: pointer; }
+    .fixedDataTableRowLayout_main { display: flex; gap: 12px; padding: 4px 0; border-top: 1px solid #ddd; }
+    .fixedDataTableRowLayout_main > div { display: flex; gap: 12px; align-items: center; }
+    .filterFlyout, .lookupPopup {
+      position: absolute; background: #fff; border: 1px solid #888; padding: 8px; z-index: 50;
+    }
     label { display: block; margin: 6px 0; }
   </style>
 </head>
 <body>
   <!--
     A deliberately minimal stand-in for the D365 web client. It reproduces only
-    the contract the runtime helper depends on:
-      * controls addressed by data-dyn-controlname
-      * forms addressed by data-dyn-form-name
+    the contract runtime/d365.ts depends on - and it reproduces the *shape* of
+    that contract, not a convenient simplification of it:
+
+      * controls addressed by `name` first, `data-dyn-controlname` second, and
+        on different elements depending on the control type
+      * forms addressed by data-dyn-form-name, including a lookup form
       * a persistent .blockUI overlay that is toggled, never removed
-      * dialogs as [role="dialog"] subtrees that re-scope control lookups
-      * grid cells addressed by column control name + data-dyn-row-index
+      * grid rows as fixedDataTableRowLayout_ divs carrying a 1-based
+        aria-rowindex, against a recorder that counts rows from zero
+      * a column-header filter flyout with an operator chooser
+      * a checkbox that reports its state through the input, and a lookup that
+        renders outside the form that opened it
+
+    Everything here is a stand-in. Passing against this proves the converter
+    and the runtime agree with each other; it proves nothing about a real
+    environment.
   -->
   <div class="blockUI" id="blocker">Working…</div>
 
-  <div data-dyn-form-name="CustTableListPage">
-    <h1>All customers</h1>
-    <button data-dyn-controlname="SystemDefinedNewButton">New</button>
-    <button data-dyn-controlname="SystemDefinedSaveButton">Save</button>
+  <div data-dyn-form-name="PurchTable">
+    <h1>All purchase orders</h1>
 
-    <label>Customer account
-      <span data-dyn-controlname="CustAccount"><input id="listCustAccount" /></span>
-    </label>
+    <!-- ---------- list ---------- -->
+    <section id="listSection">
+      <div data-dyn-controlname="Grid" role="grid">
+        <div class="columnHeader" role="columnheader" id="purchIdHeader">Purchase order</div>
 
-    <div data-dyn-controlname="LogisticsPostalAddressGrid">
-      <h2>Addresses</h2>
-      <div class="cell" data-dyn-controlname="Street" data-dyn-row-index="0"><input /></div>
-      <div class="cell" data-dyn-controlname="City" data-dyn-row-index="0"><input /></div>
+        <div class="fixedDataTableRowLayout_main">
+          <div aria-rowindex="1"><a href="#" data-row="0">000121</a><span>Contoso</span></div>
+        </div>
+        <div class="fixedDataTableRowLayout_main">
+          <div aria-rowindex="2"><a href="#" data-row="1">000122</a><span>Fabrikam</span></div>
+        </div>
+        <div class="fixedDataTableRowLayout_main">
+          <div aria-rowindex="3"><a href="#" data-row="2">000123</a><span>Northwind</span></div>
+        </div>
+      </div>
+
+      <p>Filter applied: <span id="filterEcho">(none)</span></p>
+    </section>
+
+    <!-- ---------- detail ---------- -->
+    <section id="detailSection" class="hidden">
+      <h2>Purchase order <span id="openedRow">?</span></h2>
+
+      <div class="appBar">
+        <div data-dyn-controlname="PurchaseTab"><button type="button">Purchase</button></div>
+        <div data-dyn-controlname="ManageTab"><button type="button">Manage</button></div>
+        <button type="button" data-dyn-controlname="SystemDefinedEditButton">Edit</button>
+      </div>
+
+      <p>Active tab: <span id="activeTab">General</span></p>
+      <p>Mode: <span id="pageMode">View</span></p>
+
+      <label>Procurement category
+        <input name="PurchLine_ProcurementCategory" autocomplete="off" />
+      </label>
+
+      <label>Delivery date
+        <input name="PurchTable_DeliveryDate" />
+      </label>
+
+      <label>Mode of delivery
+        <input name="PurchTable_DlvMode" autocomplete="off" />
+      </label>
+
+      <label>Print confirmation
+        <input type="checkbox" name="PurchParmTable_Printout" />
+      </label>
+
+      <div data-dyn-controlname="PurchLineGrid" role="grid">
+        <h3>Lines</h3>
+        <div class="fixedDataTableRowLayout_main">
+          <div aria-rowindex="1">
+            <span data-dyn-controlname="PurchLine_ItemId">D0001</span>
+            <span data-dyn-controlname="PurchLine_PurchQty"><input name="PurchLine_PurchQty" /></span>
+          </div>
+        </div>
+      </div>
+
+      <p>
+        <button type="button" name="PurchFormLetter_PurchOrderJournal">Confirm</button>
+        <button type="button" data-dyn-controlname="SystemDefinedCloseButton">Close</button>
+      </p>
+    </section>
+  </div>
+
+  <!-- A message box is its own form, rendered outside the one that raised it. -->
+  <div data-dyn-form-name="SysBoxForm" id="confirmBox" class="hidden" role="dialog">
+    <p>Confirm this purchase order?</p>
+    <button type="button" name="Yes">Yes</button>
+    <button type="button" name="No">No</button>
+  </div>
+
+  <!-- A lookup is a form too, and it renders outside its caller. -->
+  <div class="lookupPopup hidden" id="dlvModeLookup" data-dyn-form-name="PurchTable_DlvMode_Lookup">
+    <div data-dyn-controlname="LookupGrid" role="grid">
+      <div class="fixedDataTableRowLayout_main">
+        <div aria-rowindex="1"><span>Air</span></div>
+      </div>
+      <div class="fixedDataTableRowLayout_main">
+        <div aria-rowindex="2"><span>Truck</span></div>
+      </div>
+      <div class="fixedDataTableRowLayout_main">
+        <div aria-rowindex="3"><span>Rail</span></div>
+      </div>
     </div>
   </div>
 
-  <div role="dialog" id="createDialog">
-    <h2>Create customer</h2>
-    <label>Account <span data-dyn-controlname="CustAccount"><input id="dlgCustAccount" /></span></label>
-    <label>Name <span data-dyn-controlname="NameRef_Name"><input /></span></label>
-    <label>Group <span data-dyn-controlname="CustGroup"><input id="dlgCustGroup" /></span></label>
-    <label>Credit limit <span data-dyn-controlname="CustTable_CreditMax"><input /></span></label>
-    <button data-dyn-controlname="OkButton">OK</button>
+  <div class="lookupPopup hidden" id="categoryLookup" data-dyn-form-name="EcoResCategorySingleLookup">
+    <div data-dyn-controlname="ctrlFormTree" role="tree">
+      <div role="treeitem" aria-expanded="false" id="treeAll">ALL (ALL)
+        <div class="treeChildren hidden">
+          <div role="treeitem">Office supplies (Office supplies)</div>
+          <div role="treeitem">Raw materials (Raw materials)</div>
+        </div>
+      </div>
+    </div>
   </div>
 
-  <div class="lookupPopup" id="lookup">
-    <div class="lookupRow">10</div>
-    <div class="lookupRow">20</div>
-    <div class="lookupRow">30</div>
+  <div class="filterFlyout hidden" id="purchIdFilter">
+    <select id="filterOperator">
+      <option value="is">is exactly</option>
+      <option value="begins">begins with</option>
+      <option value="contains">contains</option>
+    </select>
+    <input id="filterValue" />
   </div>
 
   <script>
-    const blocker = document.getElementById('blocker');
-    const dialog = document.getElementById('createDialog');
-    const lookup = document.getElementById('lookup');
+    const $ = (sel) => document.querySelector(sel);
+    const blocker = $('#blocker');
 
     // Toggle visibility, never remove: this is what real D365 does, and it is
     // exactly the case a naive "does the element exist" wait gets wrong.
@@ -71,34 +163,111 @@
       setTimeout(() => { blocker.style.display = 'none'; }, ms);
     }
 
-    document.querySelector('[data-dyn-controlname="SystemDefinedNewButton"]')
-      .addEventListener('click', () => { block(250); dialog.style.display = 'block'; });
+    function show(el) { el.classList.remove('hidden'); }
+    function hide(el) { el.classList.add('hidden'); }
 
-    document.querySelector('[data-dyn-controlname="OkButton"]')
+    // ---- filter -----------------------------------------------------------
+    $('#purchIdHeader').addEventListener('click', () => {
+      const rect = $('#purchIdHeader').getBoundingClientRect();
+      const flyout = $('#purchIdFilter');
+      flyout.style.left = rect.left + 'px';
+      flyout.style.top = (rect.bottom + 4) + 'px';
+      show(flyout);
+    });
+
+    $('#filterValue').addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      block(200);
+      $('#filterEcho').textContent =
+        $('#filterOperator').selectedOptions[0].textContent + ' ' + event.target.value;
+      hide($('#purchIdFilter'));
+    });
+
+    // ---- grid -------------------------------------------------------------
+    document.querySelectorAll('[data-dyn-controlname="Grid"] a').forEach((link) => {
+      link.addEventListener('click', (event) => {
+        event.preventDefault();
+        block(250);
+        $('#openedRow').textContent = link.textContent;
+        hide($('#listSection'));
+        show($('#detailSection'));
+      });
+    });
+
+    // ---- action pane ------------------------------------------------------
+    document.querySelectorAll('.appBar [data-dyn-controlname] button').forEach((button) => {
+      button.addEventListener('click', () => {
+        block(150);
+        $('#activeTab').textContent = button.textContent;
+      });
+    });
+
+    // ---- lookup -----------------------------------------------------------
+    const dlvMode = document.querySelector('input[name="PurchTable_DlvMode"]');
+    dlvMode.addEventListener('click', () => {
+      const rect = dlvMode.getBoundingClientRect();
+      const popup = $('#dlvModeLookup');
+      popup.style.left = rect.left + 'px';
+      popup.style.top = (rect.bottom + 4) + 'px';
+      show(popup);
+    });
+
+    document.querySelectorAll('#dlvModeLookup [aria-rowindex]').forEach((row) => {
+      row.addEventListener('click', () => {
+        block(150);
+        dlvMode.value = row.textContent.trim();
+        hide($('#dlvModeLookup'));
+      });
+    });
+
+    // ---- edit mode --------------------------------------------------------
+    document.querySelector('[data-dyn-controlname="SystemDefinedEditButton"]')
+      .addEventListener('click', () => {
+        block(150);
+        const mode = $('#pageMode');
+        mode.textContent = mode.textContent === 'View' ? 'Edit' : 'View';
+      });
+
+    // ---- category tree ----------------------------------------------------
+    const category = document.querySelector('input[name="PurchLine_ProcurementCategory"]');
+    category.addEventListener('click', () => {
+      const rect = category.getBoundingClientRect();
+      const popup = $('#categoryLookup');
+      popup.style.left = rect.left + 'px';
+      popup.style.top = (rect.bottom + 4) + 'px';
+      show(popup);
+    });
+
+    // A branch has to be expanded before what is under it can be clicked -
+    // which is the whole reason a tree path is walked segment by segment.
+    $('#treeAll').addEventListener('click', (event) => {
+      if (event.target !== $('#treeAll')) return;
+      block(120);
+      $('#treeAll').setAttribute('aria-expanded', 'true');
+      $('#treeAll').querySelector('.treeChildren').classList.remove('hidden');
+    });
+
+    document.querySelectorAll('#categoryLookup .treeChildren [role="treeitem"]').forEach((leaf) => {
+      leaf.addEventListener('click', () => {
+        block(150);
+        category.value = leaf.textContent.trim();
+        hide($('#categoryLookup'));
+      });
+    });
+
+    // ---- confirm ----------------------------------------------------------
+    document.querySelector('button[name="PurchFormLetter_PurchOrderJournal"]')
+      .addEventListener('click', () => { block(250); show($('#confirmBox')); });
+
+    document.querySelector('button[name="Yes"]')
+      .addEventListener('click', () => { block(250); hide($('#confirmBox')); });
+
+    document.querySelector('[data-dyn-controlname="SystemDefinedCloseButton"]')
       .addEventListener('click', () => {
         block(250);
-        document.getElementById('listCustAccount').value =
-          document.getElementById('dlgCustAccount').value;
-        dialog.style.display = 'none';
+        hide($('#detailSection'));
+        show($('#listSection'));
       });
-
-    document.querySelector('[data-dyn-controlname="SystemDefinedSaveButton"]')
-      .addEventListener('click', () => block(400));
-
-    // Lookup: opens a flyout whose rows carry the exact option text.
-    document.getElementById('dlgCustGroup').addEventListener('click', () => {
-      const rect = dialog.getBoundingClientRect();
-      lookup.style.left = rect.left + 'px';
-      lookup.style.top = (rect.bottom + 4) + 'px';
-      lookup.style.display = 'block';
-    });
-
-    lookup.querySelectorAll('.lookupRow').forEach((row) => {
-      row.addEventListener('click', () => {
-        document.getElementById('dlgCustGroup').value = row.textContent.trim();
-        lookup.style.display = 'none';
-      });
-    });
   </script>
 </body>
 </html>

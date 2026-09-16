@@ -16,12 +16,19 @@ internal static class Fixtures
 
     public static string Normalize(string text) => text.Replace("\r\n", "\n", StringComparison.Ordinal);
 
+    /// <summary>
+    /// Wrap nodes in the container a real export uses: the action tree hangs
+    /// off <c>RootScope</c>, not off a top-level <c>Nodes</c>.
+    /// </summary>
     public static string Wrap(string name, string nodes) =>
         $"""
-         <AxTaskRecording xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
-           <Name>{name}</Name><Nodes>{nodes}</Nodes></AxTaskRecording>
+         <Recording xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+           <Name>{name}</Name><RootScope><Children>{nodes}</Children></RootScope></Recording>
          """;
 
     public static List<Action> LowerXml(string nodes) =>
         Lower.Run(RecordingReader.Parse(Wrap("T", nodes))).Actions;
+
+    public static TestCase LowerCase(string nodes) =>
+        Lower.Run(RecordingReader.Parse(Wrap("T", nodes)));
 }

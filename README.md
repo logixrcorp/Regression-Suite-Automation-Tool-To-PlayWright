@@ -28,17 +28,22 @@ separate implementations to be held to byte-for-byte agreement in CI.
 
 ## ⚠️ Project status
 
-> **This has not been validated against a real D365 environment.**
+> **The mapping table is derived from real recordings. The runtime is not.**
 >
-> It was built against *synthetic* schemas modelled on production shapes. The
-> bundled recording fixture is synthetic, and the end-to-end suite runs against a
-> mock reproducing D365's DOM contract — not a live instance. Everything passing
-> proves the tool is self-consistent, nothing more.
+> The parser and the mapping table were built against real exported `.axtr`
+> recordings, and the conversion is checked against several of them: 89–100% of
+> actions translate, with the rest listed by name in the report. The bundled
+> fixture is synthetic, but it is written in the real schema.
 >
-> Treat the mapping table (`src/lower.rs`, or `csharp/src/Rsat2Pw.Core/Lower.cs`),
-> the selectors in `runtime/d365.ts`, and every generated spec as a **starting
-> point to verify**. Run against a sandbox or tier-2 environment first — never
-> straight at production. See [Before you trust it](#before-you-trust-it-on-real-recordings).
+> What has **not** happened is a run against a live D365 environment. The
+> end-to-end suite drives a mock that reproduces the client's DOM contract, not
+> an instance. So the *conversion* is evidence-backed; the *selectors* in
+> `runtime/d365.ts` are the informed-guess half, and they are where your first
+> hour will go. Every failure there names the control, its type and each
+> selector tried, so a fix is a one-line addition to one table.
+>
+> Run against a sandbox or tier-2 environment first — never straight at
+> production. See [Before you trust it](#before-you-trust-it-on-real-recordings).
 >
 > **Logixr is not responsible if it breaks your systems. Run at your own risk.**
 > No warranty of any kind, express or implied.
@@ -60,20 +65,33 @@ separate implementations to be held to byte-for-byte agreement in CI.
 
 ## Why this maps cleanly
 
-Task Recorder captures **AOT control names**. The D365 web client renders those
-same names into the DOM as `data-dyn-controlname`. Recorded control identity
-therefore maps straight to a stable Playwright locator — no XPath, no
-heuristics, no scraping of generated ids.
+Task Recorder captures **AOT control names**, and the D365 web client renders
+those same names into the DOM — as `name`, as `data-dyn-controlname`, or on a
+wrapper around the real element, depending on the kind of control. Recorded
+control identity therefore maps to a stable locator with no XPath, no
+heuristics and no scraping of generated ids.
 
-That is normally the hardest part of any record-to-replay conversion, and here
-it falls out of how the platform already works.
+Two things in the recording make that work, and both are easy to get backwards:
+
+**The recorder names the verb, not the target.** A recorded click is
+`CommandName=Click` against `ControlName=PurchCopyJournalHeader`. Read
+`CommandName` as the thing to click and you generate a suite that hunts the
+screen for a button labelled "Click".
+
+**`ControlType` says how to reach it.** `MenuItemButton`, `Input`, `Grid`,
+`AppBarTab`, `CheckBox` and the rest each live at a different place in the
+DOM, so the type rides along with every generated call and the runtime keeps
+one table of selector candidates per type.
 
 ```
 .axtr (zip) ──► tolerant XML tree ──► RecNode ──► action IR ──► TypeScript
-                     xml.rs           recording.rs   lower.rs     codegen.rs
+  Recording.xml      xml.rs          recording.rs   lower.rs     codegen.rs
+                                          │
+                       <RootScope><Children> is the action tree;
+                       <UserActions> is back-references, not actions
 
-RSAT .xlsx parameters ─────────────────────────────► data-driven fixtures
-                                                          params.rs
+recorded input values ─────────────────────────────► data-driven fixtures
+RSAT .xlsx parameters                                     params.rs
 ```
 
 ## Requirements
@@ -100,9 +118,9 @@ latter into its working folder, so either works directly.
 ```bash
 cargo build --release
 
-./target/release/rsat2pw fixtures/CreateCustomer.axtr \
+./target/release/rsat2pw fixtures/ConfirmPurchaseOrder.axtr \
     --out-dir tests \
-    --params fixtures/CreateCustomer-params.xlsx \
+    --params fixtures/ConfirmPurchaseOrder-params.xlsx \
     --emit-runtime
 ```
 
@@ -115,9 +133,9 @@ cargo build --release
 cd csharp
 dotnet build --configuration Release
 
-dotnet run --project src/Rsat2Pw.Cli -- ../fixtures/CreateCustomer.axtr \
+dotnet run --project src/Rsat2Pw.Cli -- ../fixtures/ConfirmPurchaseOrder.axtr \
     --out-dir ../tests \
-    --params ../fixtures/CreateCustomer-params.xlsx \
+    --params ../fixtures/ConfirmPurchaseOrder-params.xlsx \
     --emit-runtime
 ```
 
@@ -160,54 +178,114 @@ rsat2pw <INPUT> [OPTIONS]
 
 ```ts
 for (const params of cases) {
-  test(`Create customer [${params.__case}]`, async ({ page }) => {
+  test(`Confirm purchase order [${params.__case}]`, async ({ page }) => {
     const d365 = await D365.open(page);
 
-    await test.step('Create a new customer', async () => {
-      await d365.command('New');
-      await d365.withDialog('Create customer', async () => {
-        await d365.setField('CustAccount', params.Customer_account);
-        await d365.setField('NameRef_Name', params.Customer_name);
-        await d365.lookup('CustGroup', params.Customer_group);
-        await d365.command('OK');
+    await test.step('Find the purchase order', async () => {
+      await d365.navigate('PurchTableListPage', 'Display');
+      await d365.withForm('PurchTable', async () => {
+        // rsat2pw: skipped 'CommandUserAction:GetFilters' - opens the filter pane; filter() does that itself
+        await d365.filter('SystemDefinedFilterManager', 'PurchId', 'Purchase order', 'Is', params.PurchId);
+        await d365.selectRow('Grid', 2);
+        await d365.openRow('Grid');
+      });
+    });
+
+    await test.step('Check the delivery details', async () => {
+      // Sub-task: Delivery details. (Begin)
+      await d365.withForm('PurchTable', async () => {
+        await d365.tab('PurchaseTab');
+        await d365.setField('PurchTable_DeliveryDate', params.PurchTable_DeliveryDate, 'Date');
+        await d365.openLookup('PurchTable_DlvMode');
+        await d365.withForm('PurchTable_DlvMode_Lookup', async () => {
+          await d365.selectRow('LookupGrid', 1);
+        });
+        await d365.commitLookup('PurchTable_DlvMode');
       });
     });
   });
 }
 ```
 
-Recorder annotations become `test.step` calls, so the Playwright trace reads
-like the original recording.
+Step groups the user made while recording become `test.step` calls and form
+scopes become `withForm`, so the Playwright trace reads like the original
+recording — while the private scopes the client wraps around its own internals
+are flattened away, since they are plumbing rather than intent.
+
+### What the mapping table covers
+
+| Recorded | Emitted |
+| --- | --- |
+| `MenuItemUserAction` | `navigate()` — a `?mi=` deep link |
+| `Scope` with `IsForm=true` | `withForm()` |
+| `Scope` with a public `IsStepGroup=true` | `test.step()` |
+| `PropertyUserAction` | `setField()` / `setGridCell()` |
+| `Click`, `TabShown` | `click()`, `tab()` |
+| `RequestPopup`, `ResolveChanges` | `openLookup()`, `commitLookup()` |
+| `ChangeSelectedIndexInCache`, `MarkActiveRow`, `NavigationAction` | `selectRow()`, `markRow()`, `openRow()` |
+| `ApplyFiltersForTaskRecorder` | `filter()`, unpacked from its JSON argument |
+| `SelectionPathChanged` | `selectTreeItem()`, walking the recorded tree path |
+| `ExecuteShortcuts` | `shortcut()` — e.g. the View/Edit toggle |
+| `RequestClose` | `closeForm()` |
+| `ValidationUserAction` | `expectValue()`, with the expected value as test data |
+| `TaskUserAction`, `InfoUserAction`, `AnnotationUserAction` | a comment — a sub-task boundary, or a note written while recording |
+
+Anything else becomes a `TODO(rsat2pw)` naming the verb that has no rule yet.
+
+**What is deliberately left unmapped**, and why — these are judgement calls, not
+oversights:
+
+| Recorded | Why there is no rule |
+| --- | --- |
+| `OpenGridView` | recorded with no control name at all, so there is nothing to target |
+| `OpenFormPart` | cannot be told apart from a part simply *rendering*, and replaying a click that never happened is worse than a TODO |
+| `SelectForAdd` | personalization. Skipping it may drop a column a later step needs; replaying it edits the test account's saved layout |
+| `FormUserAction` | the schema gives it no open/close discriminator, and no recording to hand contains one |
 
 ## Conversion reports
 
 Honest gaps are only useful if they are legible. Every run writes a conversion
-report beside the spec ([worked example](tests/CreateCustomer.report.md)) and
-prints a summary:
+report beside the spec ([worked example](tests/ConfirmPurchaseOrder.report.md))
+and prints a summary:
 
 ```
-actions   : 18 (17 translated, 1 not - 94.4%)
+actions   : 24 (22 translated, 1 skipped, 1 not - 91.7%)
 
 translated:
-  command          3
-  setField         3
-  setGridCell      2
+  click            2
+  filter           1
+  selectRow        2
+  setField         2
   ...
 
+skipped (client-internal, deliberately not replayed):
+  CommandUserAction:GetFilters     1
+
 not translated:
-  ExportToExcelUserAction          1
+  CommandUserAction:SelectForAdd   1
   <-- add rules for these in src/lower.rs; the report lists their properties
 ```
 
-The **Not translated** section is the worklist for the mapping table. Each
-unmapped action type arrives with *every* property the recorder supplied — not
-the truncated version that goes into the emitted `TODO` — because those property
-names are exactly what a new mapping rule keys off:
+There are three buckets, not two. **Skipped** is for actions the converter
+understands and deliberately does not replay — client-internal bookkeeping with
+no user-visible effect. They are counted apart from translated ones on purpose:
+otherwise the headline percentage could be improved by deciding that more and
+more of the recording does not matter. Each one still leaves a comment in the
+generated spec, because a step that vanishes without a word is indistinguishable
+from one the converter never saw.
+
+The **Not translated** section is the worklist for the mapping table. Commands
+are listed by their verb — `CommandUserAction:SelectForAdd`, not the useless
+`CommandUserAction` that every command shares — and each arrives with *every*
+property the recorder supplied, not the truncated version that goes into the
+emitted `TODO`, because those property names are exactly what a new mapping rule
+keys off:
 
 | Property | Example value |
 | --- | --- |
-| `ControlName` | `ExportToExcelButton` |
-| `OfficeTemplate` | `CustomerV3` |
+| `ControlName` | `Grid` |
+| `ControlType` | `Grid` |
+| `Description` | `Select Grid to add a field to it.` |
 
 The report also carries a **translation outline** (the whole recording in order,
 with `!!` against anything that did not convert) and a **test data** table
@@ -296,16 +374,30 @@ entire mapping table lives in one editable function.
 or a hard failure with `--on-unsupported fail`. A converter that is 85% automatic
 with visible gaps beats one that quietly emits wrong code.
 
+**"Does nothing" and "no rule for this" are different admissions.** Hence the
+separate `Skipped` bucket. Folding the two together would let a gap be closed by
+declaring it unimportant, which is the failure mode this whole design is
+guarding against.
+
+**Command arguments are not properties.** The recorder passes positional
+arguments — frequently a JSON blob — alongside a command. Flattening those into
+the property bag makes a filter command indistinguishable from a field edit, and
+emits `setField(control, \'[{"Capability":null,...}]\')`. They are parsed where
+they mean something (the filter payload) and otherwise left alone.
+
 **Generated code never touches raw locators.** Specs call only into
 `runtime/d365.ts`. D365 is aggressively asynchronous: controls render before they
 are interactive, and the blocking overlay is what actually gates input. Every
 wait, retry and quirk is concentrated in one hand-maintained file, so when the
 client changes you fix one file instead of regenerating everything.
 
-**Variables become fixtures, not literals.** That is the whole point of RSAT: one
-recording, many rows of data. Recorded variables become a `Params` type and a
-`cases` array. The workbook reader accepts both the wide layout (header row of
-variable names, one case per row) and the tall `Name`/`Value` layout.
+**Every recorded input is test data, not a literal.** That is the whole point of
+RSAT: one recording, many rows of data, which is exactly how RSAT fills the
+columns of its own parameter workbook. Each recorded value becomes a field on a
+`Params` type, named after the control that was edited and defaulting to what the
+recorder captured, so a converted recording is data-driven the moment it is
+generated. The workbook reader accepts the wide layout (header row of variable
+names, one case per row) and the tall `Name`/`Value` layout.
 
 **Navigation is deep-linked.** Recorded navigation-pane clicks are replaced with
 `?mi=<MenuItem>` deep links — faster, and immune to menu restructuring.
@@ -322,39 +414,105 @@ cd csharp && dotnet test    # C# suite, including byte-parity with the Rust outp
 CI runs all of the above on **Linux and Windows**, so a divergence between the
 two implementations fails the build.
 
-**Golden tests** assert that the committed `tests/CreateCustomer.spec.ts` and its
-report are byte-identical to what the converter emits today, so the worked
+**How the mapping table was derived.** Not from documentation — from real
+exported recordings. Eight of them are public on GitHub, found by searching for
+the data-contract namespace and the annotation type names:
+
+```bash
+gh api -X GET search/code -f q='"Microsoft.Dynamics.Client.ServerForm.TaskRecording"'
+```
+
+They are not redistributed here: their licensing is unclear and they are other
+people's business processes. The bundled fixture is synthetic, written in the
+schema those files revealed. Against that corpus the converter translates
+88–100% of actions, and the handful it does not are listed by name above. Point
+it at your own recordings and check — `--dry-run` writes nothing and still
+prints the coverage summary.
+
+The node types themselves are cross-checked against Microsoft's own published
+schema for the task recorder tables (`SysTaskRecorderNode*` in
+[microsoft/CDM](https://github.com/microsoft/CDM)), which is what turns "verbs we
+happened to see" into "verbs that exist". Four node types in that schema appear
+in none of the eight recordings; a test pins what the converter does with each.
+
+**Golden tests** assert that the committed `tests/ConfirmPurchaseOrder.spec.ts` and
+its report are byte-identical to what the converter emits today, so the worked
 examples in this README cannot drift from the code. Regenerate them with the
 command under [Quick start](#quick-start) if you change code generation
 deliberately.
 
 **`mock/`** is a self-test harness: a stand-in page reproducing D365's DOM
-contract (`data-dyn-controlname`, a toggled `.blockUI` overlay, `[role="dialog"]`
-scoping, indexed grid cells) so the converter and runtime helper can be proven
-end to end without a live environment. It has already earned its keep — the idle
-wait originally checked whether the blocking overlay *existed* rather than
-whether it was *visible*, which would have hung forever against real D365, since
-the client keeps that element in the DOM permanently.
+contract — controls addressed by `name` first and `data-dyn-controlname` second,
+forms by `data-dyn-form-name`, a toggled `.blockUI` overlay, grid rows carrying a
+1-based `aria-rowindex` against a recorder that counts from zero, a column-header
+filter flyout, and a lookup that renders outside the form that opened it — so
+the converter and runtime helper can be proven end to end without a live
+environment.
+
+It reproduces the *shape* of that contract rather than a convenient
+simplification of it, which is the only way it earns anything. It already has
+twice: the idle wait originally checked whether the blocking overlay *existed*
+rather than whether it was *visible*, which would have hung forever against real
+D365, since the client keeps that element in the DOM permanently.
 
 The mock run uses whatever Chromium `npm install` fetched. On an offline build
 agent, point `CHROMIUM_PATH` at a browser you already have.
 
 ## Before you trust it on real recordings
 
-- **Verify the XML element names against your own `.axtr` export.** The bundled
-  fixture is synthetic and modelled on the documented shape. The parser is
-  deliberately tolerant, but the mapping table is where you will spend your first
-  hour.
-- **Tune `BLOCKING_SELECTORS`** in `runtime/d365.ts` to your platform version.
+The conversion side has been checked against real exports. The runtime side has
+not been checked against a real environment, and that is where the risk is.
+
+- **Start with the selector table.** `SELECTORS` and `CONTROL_FAMILY` in
+  `runtime/d365.ts` are how each `ControlType` is found in the DOM. They are
+  grounded in how the client renders today, not in a contract Microsoft
+  publishes. A miss throws an error naming the control, its type and every
+  selector tried, so the fix is one line in one table.
+- **`filter()` is the least verified helper.** The recorder stores a filter as JSON
+  on a command rather than as a series of clicks, so there is no click sequence
+  to replay and the runtime has to drive the filter flyout itself. Check it
+  first.
+- **Grid rows assume a convention.** Recorded row indexes are zero-based and are
+  matched against the 1-based `aria-rowindex` the client renders. If your platform
+  version numbers them differently, adjust `GRID_ROW_SELECTORS`. Grids are also
+  virtualized — `setGridCell` scrolls until the row materializes, but heavily
+  filtered or sorted grids may need a business-key lookup rather than a row
+  index.
+- **Tune `BLOCKING_SELECTORS`** to your platform version.
 - **Check output menu items.** `navigate()` deep-links display menu items by bare
   name and action menu items with the documented `action:` prefix. Output menu
   items are sent unprefixed, which is **not** verified against a live environment
   — confirm it before converting a recording that opens a report.
 - **Check which MFA your tenant enforces.** TOTP can be automated; number
   matching and push approval cannot. See [Authentication](#authentication).
-- **Grids are virtualized.** `setGridCell` scrolls until the row materialises, but
-  heavily filtered or sorted grids may need a business-key lookup rather than a
-  row index.
+
+### Known gaps
+
+- **RSAT v2 parameter workbooks are not read yet.** `--params` handles a plain
+  sheet — a header row of names with one case per row, or a `Name`/`Value` pair.
+  RSAT's own generated workbooks use `General` / `TestCaseSteps` /
+  `MessageValidation` sheets instead, and pointing `--params` at one is **refused with
+  an error** rather than read: those sheets open with a title block, and reading
+  them as a plain sheet quietly invents test cases out of it. Until support
+  lands, drop `--params` — the generated data module is seeded from the values the
+  recorder captured — or point `--sheet` at a plain sheet of your own.
+- **A workbook with headers and no data rows** falls back to the recorded
+  values rather than emitting a case of blanks, and the report says so. Found
+  by running against a real third-party workbook that had exactly that shape.
+- **Validations come from the parameter file, not the recording.** RSAT holds
+  expected values on its `MessageValidation` sheet, so a converted recording
+  asserts nothing by itself. `expectValue()` exists in the runtime and is emitted
+  for recordings that carry validation nodes; add assertions by hand otherwise.
+- **Lookup selection is replayed, not resolved.** The recorder captures "row 2
+  of the lookup", not "the row whose code is AIR". If the lookup's ordering
+  differs on your data, the wrong value gets picked. Tree paths have the
+  opposite problem: they replay by the text the recorder captured, so a
+  renamed or translated node will not be found.
+- **A generated spec asserting nothing can pass while doing the wrong thing.**
+  The mock run proves the calls execute, not that they had the intended effect
+  — which is the same gap as the missing validations above, seen from the other
+  side. The runtime's own probes cover this for each helper; a converted
+  recording needs assertions of its own before a green run means much.
 
 ## License
 

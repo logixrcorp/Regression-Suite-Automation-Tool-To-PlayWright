@@ -42,9 +42,36 @@ public static class Params
         };
     }
 
+    /// <summary>Sheets that mark a workbook as one RSAT generated for itself.</summary>
+    private static readonly string[] RsatSheets = ["TestCaseSteps", "MessageValidation"];
+
+    /// <summary>
+    /// Is this one of RSAT's own parameter workbooks? It matters because the
+    /// layout is nothing like the plain sheet this reader understands, and read
+    /// as a plain sheet it does not fail - it quietly yields cases built out of
+    /// the title block, which is the worst of the available outcomes.
+    /// </summary>
+    private static bool LooksLikeAnRsatWorkbook(IReadOnlyList<string> sheetNames) =>
+        RsatSheets.Any(marker =>
+            sheetNames.Any(name => string.Equals(name, marker, StringComparison.OrdinalIgnoreCase)));
+
     public static Cases FromWorkbook(string path, string? sheet, TestCase testCase)
     {
-        var sheetName = sheet ?? Xlsx.SheetNames(path).FirstOrDefault()
+        var sheetNames = Xlsx.SheetNames(path);
+
+        if (sheet is null && LooksLikeAnRsatWorkbook(sheetNames))
+        {
+            throw new InvalidDataException(
+                $"{path} looks like an RSAT parameter workbook (sheets: {string.Join(", ", sheetNames)}).\n\n"
+                + "That layout is not supported yet - reading it as a plain sheet would \n"
+                + "silently invent test cases out of its title block. Either:\n"
+                + "  * point --sheet at a plain sheet of your own (a header row of \n"
+                + "    variable names, one case per row), or\n"
+                + "  * drop --params, and the generated data module is seeded with the \n"
+                + "    values the recording itself captured.");
+        }
+
+        var sheetName = sheet ?? sheetNames.FirstOrDefault()
             ?? throw new InvalidDataException("workbook has no sheets");
 
         var raw = Xlsx.ReadSheet(path, sheet);
@@ -55,7 +82,19 @@ public static class Params
             .ToList();
 
         var cases = IsTall(table) ? ParseTall(table) : ParseWide(table);
-        cases.Source = $"{path} [{sheetName}]";
+        var source = $"{path} [{sheetName}]";
+        cases.Source = source;
+
+        // A workbook with a header row but no data rows would otherwise produce
+        // a single case of blanks - a spec that types empty strings into every
+        // field while looking perfectly healthy. The values the recorder
+        // captured are the better answer, and the source line says so rather
+        // than pretending the workbook supplied them.
+        if (cases.Rows.Count == 0)
+        {
+            cases.Rows.Add(new Case { Label = "recorded defaults" });
+            cases.Source = $"{source} (no data rows; using recorded values)";
+        }
 
         foreach (var variable in testCase.Variables)
         {

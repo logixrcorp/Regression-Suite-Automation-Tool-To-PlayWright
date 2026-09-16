@@ -52,14 +52,47 @@ pub fn from_recording(case: &TestCase) -> Cases {
     }
 }
 
+/// Sheets that mark a workbook as one RSAT generated for itself.
+const RSAT_SHEETS: &[&str] = &["TestCaseSteps", "MessageValidation"];
+
+/// Is this one of RSAT's own parameter workbooks?
+///
+/// It matters because the layout is nothing like the plain sheet this reader
+/// understands: a title block, a "Saved variables" table, one row per recorded
+/// step, and `{{Form_Control_42}}` variable names. Read as a plain sheet it
+/// does not fail - it quietly yields cases built out of the title block, which
+/// is the worst of the available outcomes.
+fn looks_like_an_rsat_workbook(sheet_names: &[String]) -> bool {
+    RSAT_SHEETS.iter().any(|marker| {
+        sheet_names
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case(marker))
+    })
+}
+
 pub fn from_workbook(path: &Path, sheet: Option<&str>, case: &TestCase) -> Result<Cases> {
     let mut workbook =
         open_workbook_auto(path).with_context(|| format!("opening {}", path.display()))?;
 
+    let sheet_names = workbook.sheet_names().to_vec();
+
+    if sheet.is_none() && looks_like_an_rsat_workbook(&sheet_names) {
+        anyhow::bail!(
+            "{} looks like an RSAT parameter workbook (sheets: {}).\n\n\
+             That layout is not supported yet - reading it as a plain sheet would \n\
+             silently invent test cases out of its title block. Either:\n\
+             \x20 * point --sheet at a plain sheet of your own (a header row of \n\
+             \x20   variable names, one case per row), or\n\
+             \x20 * drop --params, and the generated data module is seeded with the \n\
+             \x20   values the recording itself captured.",
+            path.display(),
+            sheet_names.join(", ")
+        );
+    }
+
     let sheet_name = match sheet {
         Some(s) => s.to_string(),
-        None => workbook
-            .sheet_names()
+        None => sheet_names
             .first()
             .cloned()
             .context("workbook has no sheets")?,
@@ -81,7 +114,20 @@ pub fn from_workbook(path: &Path, sheet: Option<&str>, case: &TestCase) -> Resul
     } else {
         parse_wide(&table)
     };
-    cases.source = source;
+    cases.source = source.clone();
+
+    // A workbook with a header row but no data rows would otherwise produce a
+    // single case of blanks - a spec that types empty strings into every field
+    // while looking perfectly healthy. The values the recorder captured are
+    // the better answer, and the source line says so rather than pretending
+    // the workbook supplied them.
+    if cases.rows.is_empty() {
+        cases.rows.push(Case {
+            label: "recorded defaults".to_string(),
+            values: BTreeMap::new(),
+        });
+        cases.source = format!("{source} (no data rows; using recorded values)");
+    }
 
     // Any variable the recording expects but the workbook omits still needs to
     // exist on the params object, or the generated spec will not compile.
@@ -198,6 +244,80 @@ fn parse_wide(table: &[Vec<String>]) -> Cases {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{lower, recording};
+
+
+    /// RSAT's own parameter workbooks have a layout this reader does not
+    /// understand - and reading one as a plain sheet does not fail, it quietly
+    /// builds cases out of the title block. Refusing is the honest answer.
+    #[test]
+    fn an_rsat_parameter_workbook_is_refused_rather_than_misread() {
+        let case = lower::lower(
+            &recording::parse(include_str!("../fixtures/ConfirmPurchaseOrder.xml")).unwrap(),
+        );
+
+        let err = from_workbook(
+            std::path::Path::new("fixtures/RsatV2-params.xlsx"),
+            None,
+            &case,
+        )
+        .expect_err("an RSAT workbook must not be read as a plain sheet");
+
+        let message = format!("{err}");
+        assert!(message.contains("RSAT parameter workbook"), "{message}");
+        assert!(message.contains("TestCaseSteps"), "{message}");
+
+        // --sheet is the escape hatch, and it still works.
+        assert!(
+            from_workbook(
+                std::path::Path::new("fixtures/RsatV2-params.xlsx"),
+                Some("General"),
+                &case,
+            )
+            .is_ok()
+        );
+    }
+
+    /// A workbook can have headers and no data rows - a template someone has
+    /// not filled in yet. Emitting a case of blanks from it produces a spec
+    /// that runs, types nothing into every field, and looks healthy doing it.
+    /// Found against a real third-party workbook, which had exactly that shape.
+    #[test]
+    fn a_workbook_with_no_data_rows_falls_back_to_recorded_values() {
+        let case = lower::lower(
+            &recording::parse(include_str!("../fixtures/ConfirmPurchaseOrder.xml")).unwrap(),
+        );
+
+        let cases = from_workbook(
+            std::path::Path::new("fixtures/EmptyTemplate-params.xlsx"),
+            None,
+            &case,
+        )
+        .unwrap();
+
+        assert_eq!(cases.rows.len(), 1, "one case, not zero and not a blank");
+
+        // The recorder captured this value; the empty template must not erase it.
+        let recorded = case
+            .variables
+            .iter()
+            .find(|v| v.name == "PurchTable_DeliveryDate")
+            .expect("fixture declares a delivery date");
+        assert_eq!(recorded.default, "9/30/2026");
+        assert_eq!(
+            cases.rows[0].values.get("PurchTable_DeliveryDate"),
+            Some(&recorded.default),
+        );
+
+        // And the substitution is visible rather than silent.
+        assert!(
+            cases.source.contains("no data rows"),
+            "source should say where the values came from: {}",
+            cases.source
+        );
+    }
+
+
 
     #[test]
     fn wide_layout_yields_one_case_per_row() {
