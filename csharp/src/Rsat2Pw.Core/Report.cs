@@ -13,6 +13,14 @@ public sealed class Coverage
     [JsonPropertyName("translated")]
     public int Translated { get; init; }
 
+    /// <summary>
+    /// Understood, and deliberately not replayed. Counted apart from
+    /// <see cref="Translated"/> so the headline percentage cannot be inflated
+    /// by deciding that more and more of the recording does not matter.
+    /// </summary>
+    [JsonPropertyName("skipped")]
+    public int Skipped { get; init; }
+
     [JsonPropertyName("not_translated")]
     public int NotTranslated { get; init; }
 
@@ -59,6 +67,9 @@ public sealed class OutlineEntry
 
     [JsonPropertyName("translated")]
     public bool Translated { get; init; }
+
+    [JsonPropertyName("skipped")]
+    public bool Skipped { get; init; }
 }
 
 public sealed class Report
@@ -71,6 +82,9 @@ public sealed class Report
 
     [JsonPropertyName("translated_by_op")]
     public SortedDictionary<string, int> TranslatedByOp { get; init; } = new(StringComparer.Ordinal);
+
+    [JsonPropertyName("skipped_kinds")]
+    public List<UnmappedKind> SkippedKinds { get; init; } = [];
 
     [JsonPropertyName("not_translated")]
     public List<UnmappedKind> NotTranslated { get; init; } = [];
@@ -108,6 +122,7 @@ public sealed class Report
         s.Append("| | |\n|---|---|\n");
         s.Append($"| Actions | {c.Actions.ToString(CultureInfo.InvariantCulture)} |\n");
         s.Append(CultureInfo.InvariantCulture, $"| Translated | {c.Translated} ({c.Percent():F1}%) |\n");
+        s.Append($"| Skipped | {c.Skipped.ToString(CultureInfo.InvariantCulture)} |\n");
         s.Append($"| Not translated | {c.NotTranslated.ToString(CultureInfo.InvariantCulture)} |\n");
         s.Append($"| Test cases | {TestCases.ToString(CultureInfo.InvariantCulture)} (from {TestDataSource}) |\n\n");
 
@@ -126,8 +141,24 @@ public sealed class Report
             s.Append("| Emitted call | Count |\n|---|---:|\n");
             foreach (var (op, n) in TranslatedByOp)
             {
-                var call = op.Contains('.', StringComparison.Ordinal) ? $"{op}()" : $"d365.{op}()";
-                s.Append($"| `{call}` | {n.ToString(CultureInfo.InvariantCulture)} |\n");
+                s.Append($"| {RenderOp(op)} | {n.ToString(CultureInfo.InvariantCulture)} |\n");
+            }
+
+            s.Append('\n');
+        }
+
+        if (SkippedKinds.Count > 0)
+        {
+            s.Append("## Skipped\n\n");
+            s.Append(
+                "Recorded, understood, and deliberately not replayed: client-internal "
+                + "bookkeeping\nwith no user-visible effect. Each one still leaves a comment "
+                + "in the generated spec.\n\n");
+
+            s.Append("| Action | Count |\n|---|---:|\n");
+            foreach (var kind in SkippedKinds)
+            {
+                s.Append($"| `{kind.RawKind}` | {kind.Count.ToString(CultureInfo.InvariantCulture)} |\n");
             }
 
             s.Append('\n');
@@ -141,7 +172,7 @@ public sealed class Report
         else
         {
             s.Append(
-                "Each heading is a Task Recorder action type with no rule in "
+                "Each heading is a Task Recorder action with no rule in "
                 + "`src/lower.rs`.\nThe properties are everything the recorder "
                 + "supplied, which is what a new\nmapping rule keys off.\n\n");
 
@@ -170,7 +201,7 @@ public sealed class Report
         s.Append("## Test data\n\n");
         if (Variables.Count == 0)
         {
-            s.Append("_The recording declared no variables._\n\n");
+            s.Append("_The recording captured no input values._\n\n");
         }
         else
         {
@@ -192,19 +223,34 @@ public sealed class Report
         }
 
         s.Append("## Translation outline\n\n");
-        s.Append("The recording in order. `!!` marks an action that was not translated.\n\n");
+        s.Append(
+            "The recording in order. `!!` marks an action that was not translated, "
+            + "`~~` one\nthat was deliberately skipped.\n\n");
         s.Append("```\n");
         foreach (var e in Outline)
         {
-            var marker = e.Translated ? "   " : "!! ";
+            var marker = e.Skipped ? "~~ " : e.Translated ? "   " : "!! ";
             var indent = string.Concat(Enumerable.Repeat("  ", e.Depth));
-            s.Append($"{marker}{indent}{e.Op} {e.Detail}\n");
+            s.Append($"{marker}{indent}{e.Op} {e.Detail}".TrimEnd());
+            s.Append('\n');
         }
 
         s.Append("```\n");
 
         return s.ToString();
     }
+
+    /// <summary>
+    /// How an emitted op is named in the report. Everything reaching the
+    /// runtime is a <c>d365.</c> method; <c>test.step</c> comes from Playwright,
+    /// and a marker is a comment rather than a call at all.
+    /// </summary>
+    private static string RenderOp(string op) => op switch
+    {
+        "marker" => "a comment",
+        _ when op.Contains('.', StringComparison.Ordinal) => $"`{op}()`",
+        _ => $"`d365.{op}()`",
+    };
 
     private static string YesNo(bool b) => b ? "yes" : "no";
 
@@ -225,11 +271,13 @@ public static class Reporter
     {
         var translatedByOp = new SortedDictionary<string, int>(StringComparer.Ordinal);
         var unmapped = new SortedDictionary<string, UnmappedKind>(StringComparer.Ordinal);
+        var skipped = new SortedDictionary<string, UnmappedKind>(StringComparer.Ordinal);
         var outline = new List<OutlineEntry>();
 
-        Walk(testCase.Actions, 0, translatedByOp, unmapped, outline);
+        Walk(testCase.Actions, 0, translatedByOp, unmapped, skipped, outline);
 
         var notTranslated = unmapped.Values.Sum(u => u.Count);
+        var skippedCount = skipped.Values.Sum(u => u.Count);
         var actions = testCase.ActionCount();
 
         var referenced = ReferencedVariables(testCase.Actions);
@@ -249,10 +297,12 @@ public static class Reporter
             Coverage = new Coverage
             {
                 Actions = actions,
-                Translated = Math.Max(0, actions - notTranslated),
+                Translated = Math.Max(0, actions - notTranslated - skippedCount),
+                Skipped = skippedCount,
                 NotTranslated = notTranslated,
             },
             TranslatedByOp = translatedByOp,
+            SkippedKinds = skipped.Values.ToList(),
             NotTranslated = unmapped.Values.ToList(),
             Variables = variables,
             TestCases = cases.Rows.Count,
@@ -266,11 +316,13 @@ public static class Reporter
         int depth,
         SortedDictionary<string, int> byOp,
         SortedDictionary<string, UnmappedKind> unmapped,
+        SortedDictionary<string, UnmappedKind> skipped,
         List<OutlineEntry> outline)
     {
         foreach (var action in actions)
         {
-            var translated = action is not Action.Unsupported;
+            var isSkipped = action is Action.Skipped;
+            var translated = action is not Action.Unsupported && !isSkipped;
 
             outline.Add(new OutlineEntry
             {
@@ -278,30 +330,48 @@ public static class Reporter
                 Op = action.OpName(),
                 Detail = action.Summary(),
                 Translated = translated,
+                Skipped = isSkipped,
             });
 
-            if (action is Action.Unsupported unsupportedAction)
+            switch (action)
             {
-                if (!unmapped.TryGetValue(unsupportedAction.RawKind, out var entry))
-                {
-                    entry = new UnmappedKind { RawKind = unsupportedAction.RawKind };
-                    unmapped[unsupportedAction.RawKind] = entry;
-                }
+                case Action.Unsupported a:
+                    Record(unmapped, a.RawKind, a.Props);
+                    break;
 
-                entry.Count += 1;
+                case Action.Skipped a:
+                    Record(skipped, a.RawKind, a.Props);
+                    break;
 
-                foreach (var (key, value) in unsupportedAction.Props)
+                default:
                 {
-                    entry.Props.TryAdd(key, value);
+                    var op = action.OpName();
+                    byOp[op] = byOp.TryGetValue(op, out var count) ? count + 1 : 1;
+                    break;
                 }
             }
-            else
-            {
-                var op = action.OpName();
-                byOp[op] = byOp.TryGetValue(op, out var count) ? count + 1 : 1;
-            }
 
-            Walk(action.ChildActions(), depth + 1, byOp, unmapped, outline);
+            Walk(action.ChildActions(), depth + 1, byOp, unmapped, skipped, outline);
+        }
+    }
+
+    private static void Record(
+        SortedDictionary<string, UnmappedKind> into,
+        string rawKind,
+        SortedDictionary<string, string> props)
+    {
+        if (!into.TryGetValue(rawKind, out var entry))
+        {
+            entry = new UnmappedKind { RawKind = rawKind };
+            into[rawKind] = entry;
+        }
+
+        entry.Count += 1;
+
+        foreach (var (key, value) in props)
+        {
+            // First example value wins; later occurrences only widen the key set.
+            entry.Props.TryAdd(key, value);
         }
     }
 
@@ -329,7 +399,7 @@ public static class Reporter
                     case Action.SetGridValue a:
                         Note(a.Value, result);
                         break;
-                    case Action.Lookup a:
+                    case Action.Filter a:
                         Note(a.Value, result);
                         break;
                     case Action.Validate a:

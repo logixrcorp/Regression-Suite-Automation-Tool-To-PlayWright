@@ -21,29 +21,91 @@ public enum MenuItemKind
     Output,
 }
 
+/// <summary>
+/// The normalized action IR. Mirrors <c>src/ir.rs</c>; the two implementations
+/// are held to byte-identical output, so any change here needs the same change
+/// there.
+/// </summary>
 public abstract record Action
 {
+    /// <summary>Deep-link to a menu item.</summary>
     public sealed record Navigate(string MenuItem, MenuItemKind Kind) : Action;
 
-    public sealed record EnterForm(string Form) : Action;
+    /// <summary>A form scope (<c>IsForm</c>), which narrows control lookups.</summary>
+    public sealed record Form(string FormName, List<Action> Children) : Action;
 
-    public sealed record LeaveForm(string Form) : Action;
+    /// <summary>A recorder step group (<c>IsStepGroup</c>).</summary>
+    public sealed record Step(string Label, List<Action> Children) : Action;
 
-    public sealed record SetValue(string Control, Value Value) : Action;
+    /// <summary><c>CommandName=Click</c>, against <c>ControlName</c>.</summary>
+    public sealed record Click(string Control, string ControlType) : Action;
 
-    public sealed record SetGridValue(string Grid, string Column, int Row, Value Value) : Action;
+    /// <summary><c>CommandName=TabShown</c>.</summary>
+    public sealed record Tab(string Control) : Action;
 
-    public sealed record Click(string Control) : Action;
+    /// <summary><c>PropertyUserAction</c> with <c>PropertyName=Value</c>.</summary>
+    public sealed record SetValue(string Control, string ControlType, Value Value) : Action;
 
-    public sealed record Command(string Name) : Action;
+    /// <summary>The same, addressed into a grid row.</summary>
+    public sealed record SetGridValue(
+        string Grid,
+        string Column,
+        int Row,
+        string ControlType,
+        Value Value) : Action;
 
-    public sealed record Lookup(string Control, Value Value) : Action;
+    /// <summary><c>CommandName=RequestPopup</c>.</summary>
+    public sealed record OpenLookup(string Control) : Action;
 
-    public sealed record Dialog(string Name, List<Action> Children) : Action;
+    /// <summary><c>CommandName=ResolveChanges</c>.</summary>
+    public sealed record CommitLookup(string Control) : Action;
+
+    /// <summary><c>CommandName=ChangeSelectedIndexInCache</c>.</summary>
+    public sealed record SelectRow(string Grid, int Row) : Action;
+
+    /// <summary><c>CommandName=MarkActiveRow</c>.</summary>
+    public sealed record MarkRow(string Grid) : Action;
+
+    /// <summary><c>CommandName=NavigationAction</c>.</summary>
+    public sealed record OpenRow(string Grid) : Action;
+
+    /// <summary><c>CommandName=ApplyFiltersForTaskRecorder</c>, unpacked from JSON.</summary>
+    public sealed record Filter(
+        string Control,
+        string Field,
+        string Label,
+        string Operator,
+        Value Value) : Action;
+
+    /// <summary>
+    /// <c>CommandName=SelectionPathChanged</c> - pick a node in a tree. The
+    /// path arrives backslash-separated, as the tree renders it.
+    /// </summary>
+    public sealed record SelectTreeItem(string Control, Value Path) : Action;
+
+    /// <summary>
+    /// <c>CommandName=ExecuteShortcuts</c> - a named client shortcut, such as
+    /// the one that flips a page between View and Edit mode.
+    /// </summary>
+    public sealed record Shortcut(string Name) : Action;
+
+    /// <summary><c>CommandName=RequestClose</c>.</summary>
+    public sealed record CloseForm : Action;
 
     public sealed record Validate(string Control, Value Expected) : Action;
 
-    public sealed record Step(string Label, List<Action> Children) : Action;
+    /// <summary>A <c>TaskUserAction</c> sub-task boundary; emitted as a comment.</summary>
+    public sealed record Marker(string Text) : Action;
+
+    /// <summary>
+    /// Recorded, understood, and deliberately not replayed. Distinct from
+    /// <see cref="Unsupported"/>: "this one does nothing" and "we have no rule
+    /// for this" are different admissions.
+    /// </summary>
+    public sealed record Skipped(
+        string RawKind,
+        string Detail,
+        SortedDictionary<string, string> Props) : Action;
 
     public sealed record Unsupported(
         string RawKind,
@@ -53,16 +115,24 @@ public abstract record Action
     public string OpName() => this switch
     {
         Navigate => "navigate",
-        EnterForm => "enterForm",
-        LeaveForm => "leaveForm",
+        Form => "withForm",
+        Step => "test.step",
+        Click => "click",
+        Tab => "tab",
         SetValue => "setField",
         SetGridValue => "setGridCell",
-        Click => "click",
-        Command => "command",
-        Lookup => "lookup",
+        OpenLookup => "openLookup",
+        CommitLookup => "commitLookup",
+        SelectRow => "selectRow",
+        MarkRow => "markRow",
+        OpenRow => "openRow",
+        Filter => "filter",
+        SelectTreeItem => "selectTreeItem",
+        Shortcut => "shortcut",
+        CloseForm => "closeForm",
         Validate => "expectValue",
-        Dialog => "withDialog",
-        Step => "test.step",
+        Marker => "marker",
+        Skipped => "skipped",
         Unsupported => "unsupported",
         _ => throw new InvalidOperationException("unreachable"),
     };
@@ -70,16 +140,24 @@ public abstract record Action
     public string Summary() => this switch
     {
         Navigate a => $"{a.MenuItem} ({Ir.KindAsString(a.Kind)})",
-        EnterForm a => a.Form,
-        LeaveForm a => a.Form,
+        Form a => a.FormName,
+        Step a => a.Label,
+        Click a => $"{a.Control} ({a.ControlType})",
+        Tab a => a.Control,
         SetValue a => $"{a.Control} = {a.Value.ToTs()}",
         SetGridValue a => $"{a.Grid}[{a.Row}].{a.Column} = {a.Value.ToTs()}",
-        Click a => a.Control,
-        Command a => a.Name,
-        Lookup a => $"{a.Control} <- {a.Value.ToTs()}",
+        OpenLookup a => a.Control,
+        CommitLookup a => a.Control,
+        SelectRow a => $"{a.Grid}[{a.Row}]",
+        MarkRow a => a.Grid,
+        OpenRow a => a.Grid,
+        Filter a => $"{a.Field} {a.Operator} {a.Value.ToTs()}",
+        SelectTreeItem a => $"{a.Control} <- {a.Path.ToTs()}",
+        Shortcut a => a.Name,
+        CloseForm => "",
         Validate a => $"{a.Control} == {a.Expected.ToTs()}",
-        Dialog a => a.Name,
-        Step a => a.Label,
+        Marker a => a.Text,
+        Skipped a => a.Detail.Length == 0 ? a.RawKind : $"{a.RawKind} ({a.Detail})",
         Unsupported a => a.RawKind,
         _ => throw new InvalidOperationException("unreachable"),
     };
@@ -87,7 +165,7 @@ public abstract record Action
     public IReadOnlyList<Action> ChildActions() => this switch
     {
         Step s => s.Children,
-        Dialog d => d.Children,
+        Form f => f.Children,
         _ => [],
     };
 }
@@ -102,21 +180,16 @@ public sealed class TestCase
 
     public List<Action> Actions { get; init; } = [];
 
-    public int UnsupportedCount() => Walk(Actions);
+    public int UnsupportedCount() => CountMatching(Actions, static a => a is Action.Unsupported);
 
-    private static int Walk(IReadOnlyList<Action> actions)
+    public int SkippedCount() => CountMatching(Actions, static a => a is Action.Skipped);
+
+    private static int CountMatching(IReadOnlyList<Action> actions, Func<Action, bool> predicate)
     {
         var total = 0;
         foreach (var action in actions)
         {
-            if (action is Action.Unsupported)
-            {
-                total += 1;
-            }
-            else
-            {
-                total += Walk(action.ChildActions());
-            }
+            total += (predicate(action) ? 1 : 0) + CountMatching(action.ChildActions(), predicate);
         }
 
         return total;

@@ -9,71 +9,317 @@ public class LowerTests
     {
         var actions = Fixtures.LowerXml(
             """
-            <Node i:type="MenuItemUserAction"><MenuItemName>CustTableListPage</MenuItemName>
+            <Node i:type="MenuItemUserAction"><MenuItemName>purchtablelistpage</MenuItemName>
             <MenuItemType>Display</MenuItemType></Node>
             """);
 
-        Assert.Equal(new Action.Navigate("CustTableListPage", MenuItemKind.Display), actions[0]);
+        Assert.Equal(new Action.Navigate("purchtablelistpage", MenuItemKind.Display), actions[0]);
     }
 
+    /// <summary>
+    /// The recorder puts the verb in <c>CommandName</c> and the target in
+    /// <c>ControlName</c>. Reading it the other way round emits a suite that
+    /// hunts for a button labelled "Click".
+    /// </summary>
     [Fact]
-    public void VariableBoundInputBecomesAParameterNotALiteral()
+    public void AClickCommandTargetsTheControlNotTheVerb()
     {
         var actions = Fixtures.LowerXml(
             """
-            <Node i:type="InputUserAction"><ControlName>CustAccount</ControlName>
-            <Value>US-001</Value><VariableName>Customer account</VariableName></Node>
+            <Node i:type="CommandUserAction"><CommandName>Click</CommandName>
+            <ControlName>PurchCopyJournalHeader</ControlName>
+            <ControlType>MenuItemButton</ControlType></Node>
             """);
 
-        Assert.Equal(
-            new Action.SetValue("CustAccount", new Value.Variable("Customer_account")),
-            actions[0]);
+        Assert.Equal(new Action.Click("PurchCopyJournalHeader", "MenuItemButton"), actions[0]);
     }
 
     [Fact]
-    public void UnknownNodeKindsDegradeToATodo()
+    public void FieldEntryBecomesAParameterDefaultingToTheRecordedValue()
+    {
+        var testCase = Fixtures.LowerCase(
+            """
+            <Node i:type="PropertyUserAction"><PropertyName>Value</PropertyName>
+            <ControlName>PurchParmTable_Num</ControlName><ControlType>Input</ControlType>
+            <UserActionType>Input</UserActionType><Value>123</Value></Node>
+            """);
+
+        Assert.Equal(
+            new Action.SetValue("PurchParmTable_Num", "Input", new Value.Variable("PurchParmTable_Num")),
+            testCase.Actions[0]);
+
+        Assert.Equal([new Variable("PurchParmTable_Num", "123")], testCase.Variables);
+    }
+
+    /// <summary>
+    /// The filter a user typed lives in a JSON command argument, not in a
+    /// property. Left in the property bag it reads as a field edit.
+    /// </summary>
+    [Fact]
+    public void AFilterCommandUnpacksItsJsonArgument()
+    {
+        var testCase = Fixtures.LowerCase(
+            """
+            <Node i:type="CommandUserAction">
+              <Arguments><CommandArgument><Value>[{"Capability":{"FieldLabel":"Purchase order","FieldName":""},"FieldName":"PurchId","Operator":"Is","Values":["003643"]}]</Value></CommandArgument></Arguments>
+              <CommandName>ApplyFiltersForTaskRecorder</CommandName>
+              <ControlName>SystemDefinedFilterManager</ControlName>
+              <ControlType>FilterManager</ControlType></Node>
+            """);
+
+        Assert.Equal(
+            new Action.Filter(
+                "SystemDefinedFilterManager",
+                "PurchId",
+                "Purchase order",
+                "Is",
+                new Value.Variable("PurchId")),
+            testCase.Actions[0]);
+
+        Assert.Equal("003643", testCase.Variables[0].Default);
+    }
+
+    [Fact]
+    public void GridCommandsCarryTheListAndTheRow()
     {
         var actions = Fixtures.LowerXml(
-            """<Node i:type="SomeFutureUserAction"><Mystery>42</Mystery></Node>""");
+            """
+            <Node i:type="CommandUserAction">
+              <Arguments><CommandArgument><Value>3</Value></CommandArgument></Arguments>
+              <CommandName>ChangeSelectedIndexInCache</CommandName>
+              <ListContext>Grid</ListContext><ControlName>Grid</ControlName>
+              <ControlType>Grid</ControlType></Node>
+            """);
+
+        Assert.Equal(new Action.SelectRow("Grid", 3), actions[0]);
+    }
+
+    /// <summary>
+    /// A step group is the user's own annotation and becomes a
+    /// <c>test.step</c>; the private scopes the client wraps around its
+    /// internals are lifted away.
+    /// </summary>
+    [Fact]
+    public void StepGroupsAreKeptAndPrivatePlumbingScopesAreFlattened()
+    {
+        var actions = Fixtures.LowerXml(
+            """
+            <Node i:type="Scope">
+              <Description>Create the order</Description>
+              <IsForm>false</IsForm><IsStepGroup>true</IsStepGroup>
+              <Children>
+                <Node i:type="Scope">
+                  <IsForm>false</IsForm><IsStepGroup>false</IsStepGroup>
+                  <Name>SystemDefinedFilterManager_GetFilters</Name><ScopeType>Private</ScopeType>
+                  <Children>
+                    <Node i:type="CommandUserAction"><CommandName>Click</CommandName>
+                      <ControlName>OkButton</ControlName><ControlType>CommandButton</ControlType></Node>
+                  </Children>
+                </Node>
+              </Children>
+            </Node>
+            """);
+
+        var step = Assert.IsType<Action.Step>(actions[0]);
+        Assert.Equal("Create the order", step.Label);
+        Assert.Single(step.Children);
+        Assert.IsType<Action.Click>(step.Children[0]);
+    }
+
+    /// <summary>
+    /// The client groups its own work the same way the user does. Every lookup
+    /// it opens becomes a private <c>&lt;control&gt;_RequestPopup</c> step
+    /// group, and in real recordings those outnumber the user's own entirely.
+    /// </summary>
+    [Fact]
+    public void PrivateStepGroupsAreTheClientsOwnAndGetFlattened()
+    {
+        var actions = Fixtures.LowerXml(
+            """
+            <Node i:type="Scope">
+              <IsForm>false</IsForm><IsStepGroup>true</IsStepGroup>
+              <Name>CompanyLookup_RequestPopup</Name><ScopeType>Private</ScopeType>
+              <Children>
+                <Node i:type="CommandUserAction"><CommandName>RequestPopup</CommandName>
+                  <ControlName>CompanyLookup</ControlName><ControlType>Input</ControlType></Node>
+              </Children>
+            </Node>
+            """);
+
+        Assert.Equal([new Action.OpenLookup("CompanyLookup")], actions);
+    }
+
+    /// <summary>
+    /// Task Recorder records inside the client it is recording, so its own
+    /// pane appears as a form scope around ordinary actions.
+    /// </summary>
+    [Fact]
+    public void TheRecordersOwnPaneIsNotTreatedAsAForm()
+    {
+        var actions = Fixtures.LowerXml(
+            """
+            <Node i:type="Scope">
+              <IsForm>true</IsForm><IsStepGroup>false</IsStepGroup>
+              <Name>SysBPMPane</Name><ScopeType>Public</ScopeType>
+              <Children>
+                <Node i:type="CommandUserAction"><CommandName>TabShown</CommandName>
+                  <ControlName>PurchOrder</ControlName><ControlType>AppBarTab</ControlType></Node>
+              </Children>
+            </Node>
+            """);
+
+        Assert.Equal([new Action.Tab("PurchOrder")], actions);
+    }
+
+    [Fact]
+    public void UnknownCommandsAreReportedByTheirVerb()
+    {
+        var actions = Fixtures.LowerXml(
+            """
+            <Node i:type="CommandUserAction"><CommandName>SelectForAdd</CommandName>
+            <ControlName>Grid</ControlName><ControlType>Grid</ControlType></Node>
+            """);
 
         var unsupported = Assert.IsType<Action.Unsupported>(actions[0]);
-        Assert.Equal("SomeFutureUserAction", unsupported.RawKind);
-        Assert.Contains("Mystery=42", unsupported.Detail, StringComparison.Ordinal);
+        Assert.Equal("CommandUserAction:SelectForAdd", unsupported.RawKind);
 
-        Assert.Equal("42", unsupported.Props["Mystery"]);
+        // The full bag is what the conversion report shows, so a rule for this
+        // verb can be written without reopening the XML.
+        Assert.Equal("Grid", unsupported.Props["ControlType"]);
     }
 
+    /// <summary>
+    /// A tree selection is recorded as a path in a command argument, the way
+    /// the tree renders it, and the value the user picked is test data like
+    /// any other recorded input.
+    /// </summary>
     [Fact]
-    public void GridActionsKeepColumnAndRow()
+    public void ATreeSelectionCarriesItsPath()
     {
-        var actions = Fixtures.LowerXml(
+        var testCase = Fixtures.LowerCase(
             """
-            <Node i:type="InputUserAction"><GridName>Lines</GridName>
-            <ColumnName>ItemId</ColumnName><RowIndex>2</RowIndex><Value>D0001</Value></Node>
+            <Node i:type="CommandUserAction">
+              <Arguments>
+                <CommandArgument><Value>ALL (ALL)\Adventure Works (Adventure Works)</Value></CommandArgument>
+                <CommandArgument><Value>1</Value></CommandArgument>
+              </Arguments>
+              <CommandName>SelectionPathChanged</CommandName>
+              <ControlName>ctrlFormTree</ControlName><ControlType>Tree</ControlType></Node>
             """);
 
         Assert.Equal(
-            new Action.SetGridValue("Lines", "ItemId", 2, new Value.Literal("D0001")),
-            actions[0]);
+            new Action.SelectTreeItem("ctrlFormTree", new Value.Variable("ctrlFormTree")),
+            testCase.Actions[0]);
+
+        Assert.Equal(@"ALL (ALL)\Adventure Works (Adventure Works)", testCase.Variables[0].Default);
+    }
+
+    /// <summary>
+    /// The shortcut name is the whole instruction. Without it there is nothing
+    /// to replay, so it degrades rather than emitting a nameless call.
+    /// </summary>
+    [Fact]
+    public void ANamedShortcutIsMappedAndANamelessOneIsNot()
+    {
+        var mapped = Fixtures.LowerXml(
+            """
+            <Node i:type="CommandUserAction">
+              <Arguments><CommandArgument><Value>ViewEdit</Value></CommandArgument></Arguments>
+              <CommandName>ExecuteShortcuts</CommandName><ControlName></ControlName></Node>
+            """);
+
+        Assert.Equal(new Action.Shortcut("ViewEdit"), mapped[0]);
+
+        var bare = Fixtures.LowerXml(
+            """<Node i:type="CommandUserAction"><CommandName>ExecuteShortcuts</CommandName></Node>""");
+
+        Assert.IsType<Action.Unsupported>(bare[0]);
+    }
+
+    /// <summary>
+    /// A note is the one thing in a recording that was written in prose, on
+    /// purpose. Dropping it loses the only instruction a human left behind.
+    /// </summary>
+    [Fact]
+    public void ARecordedNoteSurvivesAsAComment()
+    {
+        var actions = Fixtures.LowerXml(
+            """
+            <Node i:type="InfoUserAction"><Description>Note.</Description>
+              <Notes>Check the open period.</Notes><Text>Check it</Text></Node>
+            <Node i:type="AnnotationUserAction"><Description>Annotated step.</Description></Node>
+            """);
+
+        Assert.Equal(
+            [new Action.Marker("Check the open period."), new Action.Marker("Annotated step.")],
+            actions);
+    }
+
+    /// <summary>
+    /// Microsoft's CDM schema for the task recorder tables
+    /// (<c>SysTaskRecorderNode*</c>) lists node types that none of the real
+    /// recordings available to test against contain: a recorded note, a
+    /// validation, a form open, and a bare annotation. They have to degrade
+    /// safely - mapped, or named in the report - rather than vanish.
+    /// </summary>
+    [Fact]
+    public void NodeTypesNoSampleRecordingContainsStillDegradeHonestly()
+    {
+        var actions = Fixtures.LowerXml(
+            """
+            <Node i:type="InfoUserAction"><Description>Note.</Description>
+              <Notes>Check the posting profile.</Notes><Text>Check it</Text></Node>
+            <Node i:type="ValidationUserAction"><Name>ValidateCustAccount</Name>
+              <ControlName>SalesTable_CustAccount</ControlName><ControlType>Input</ControlType></Node>
+            <Node i:type="FormUserAction"><ControlLabel>All sales orders</ControlLabel>
+              <FormId>123_SalesTableListPage_abc</FormId></Node>
+            <Node i:type="AnnotationUserAction"><Description>Annotated step.</Description></Node>
+            """);
+
+        Assert.Equal(4, actions.Count);
+
+        // A note becomes a comment, and a validation maps: its expected value
+        // is test data, which is where RSAT keeps it too.
+        Assert.IsType<Action.Marker>(actions[0]);
+        var validate = Assert.IsType<Action.Validate>(actions[1]);
+        Assert.Equal("SalesTable_CustAccount", validate.Control);
+        Assert.IsType<Action.Marker>(actions[3]);
+
+        // A form open is the one left: the schema gives it no open/close
+        // discriminator, and no recording to hand contains one, so there is
+        // nothing to derive a rule from. It degrades, carrying its properties.
+        var unsupported = Assert.IsType<Action.Unsupported>(actions[2]);
+        Assert.Equal("FormUserAction", unsupported.RawKind);
+        Assert.NotEmpty(unsupported.Props);
     }
 
     [Fact]
     public void CollidingVariableNamesGetDistinctIdentifiers()
     {
         const string doc = """
-            <AxTaskRecording xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+            <Recording xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
               <Name>T</Name>
               <Variables>
                 <AxTaskRecordingVariable><Name>Customer name</Name><Value>a</Value></AxTaskRecordingVariable>
                 <AxTaskRecordingVariable><Name>Customer-name</Name><Value>b</Value></AxTaskRecordingVariable>
                 <AxTaskRecordingVariable><Name>__case</Name><Value>c</Value></AxTaskRecordingVariable>
               </Variables>
-              <Nodes/></AxTaskRecording>
+              <RootScope><Children/></RootScope></Recording>
             """;
 
         var names = Lower.Run(RecordingReader.Parse(doc)).Variables.Select(v => v.Name).ToList();
 
         Assert.Equal(["Customer_name", "Customer_name_2", "__case_2"], names);
+    }
+
+    [Fact]
+    public void JsonScannerPrefersTheFirstNonEmptyMatch()
+    {
+        const string json = """[{"Capability":{"FieldName":""},"FieldName":"PurchId","Values":["003643"]}]""";
+
+        Assert.Equal("PurchId", Lower.JsonString(json, "FieldName"));
+        Assert.Equal("003643", Lower.JsonFirstArrayString(json, "Values"));
+        Assert.Null(Lower.JsonString(json, "Missing"));
     }
 
     [Theory]

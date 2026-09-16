@@ -18,7 +18,7 @@ env:
 
 jobs:
   # The converter: parser, lowering, codegen, and the golden test that pins
-  # tests/CreateCustomer.spec.ts to what codegen actually emits today.
+  # tests/ConfirmPurchaseOrder.spec.ts to what codegen actually emits today.
   converter:
     name: cargo (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

@@ -104,63 +104,16 @@ fn emit(action: &Action, indent: usize, on_unsupported: OnUnsupported, out: &mut
 
     match action {
         Action::Navigate { menu_item, kind } => {
-            line(out, &pad, &format!(
-                "await d365.navigate('{}', '{}');",
+            call(out, &pad, &format!(
+                "navigate('{}', '{}')",
                 escape_ts(menu_item),
                 kind.as_str()
             ));
         }
-        Action::EnterForm { form } => {
-            line(out, &pad, &format!("await d365.enterForm('{}');", escape_ts(form)));
-        }
-        Action::LeaveForm { form } => {
-            line(out, &pad, &format!("await d365.leaveForm('{}');", escape_ts(form)));
-        }
-        Action::SetValue { control, value } => {
+        Action::Form { form, children } => {
             line(out, &pad, &format!(
-                "await d365.setField('{}', {});",
-                escape_ts(control),
-                value.to_ts()
-            ));
-        }
-        Action::SetGridValue {
-            grid,
-            column,
-            row,
-            value,
-        } => {
-            line(out, &pad, &format!(
-                "await d365.setGridCell('{}', '{}', {}, {});",
-                escape_ts(grid),
-                escape_ts(column),
-                row,
-                value.to_ts()
-            ));
-        }
-        Action::Click { control } => {
-            line(out, &pad, &format!("await d365.click('{}');", escape_ts(control)));
-        }
-        Action::Command { name } => {
-            line(out, &pad, &format!("await d365.command('{}');", escape_ts(name)));
-        }
-        Action::Lookup { control, value } => {
-            line(out, &pad, &format!(
-                "await d365.lookup('{}', {});",
-                escape_ts(control),
-                value.to_ts()
-            ));
-        }
-        Action::Validate { control, expected } => {
-            line(out, &pad, &format!(
-                "await d365.expectValue('{}', {});",
-                escape_ts(control),
-                expected.to_ts()
-            ));
-        }
-        Action::Dialog { name, children } => {
-            line(out, &pad, &format!(
-                "await d365.withDialog('{}', async () => {{",
-                escape_ts(name)
+                "await d365.withForm('{}', async () => {{",
+                escape_ts(form)
             ));
             emit_all(children, indent + 1, on_unsupported, out);
             line(out, &pad, "});");
@@ -173,6 +126,111 @@ fn emit(action: &Action, indent: usize, on_unsupported: OnUnsupported, out: &mut
             emit_all(children, indent + 1, on_unsupported, out);
             line(out, &pad, "});");
             out.push('\n');
+        }
+        Action::Click {
+            control,
+            control_type,
+        } => {
+            call(out, &pad, &format!(
+                "click('{}', '{}')",
+                escape_ts(control),
+                escape_ts(control_type)
+            ));
+        }
+        Action::Tab { control } => {
+            call(out, &pad, &format!("tab('{}')", escape_ts(control)));
+        }
+        Action::SetValue {
+            control,
+            control_type,
+            value,
+        } => {
+            call(out, &pad, &format!(
+                "setField('{}', {}, '{}')",
+                escape_ts(control),
+                value.to_ts(),
+                escape_ts(control_type)
+            ));
+        }
+        Action::SetGridValue {
+            grid,
+            column,
+            row,
+            control_type,
+            value,
+        } => {
+            call(out, &pad, &format!(
+                "setGridCell('{}', '{}', {}, {}, '{}')",
+                escape_ts(grid),
+                escape_ts(column),
+                row,
+                value.to_ts(),
+                escape_ts(control_type)
+            ));
+        }
+        Action::OpenLookup { control } => {
+            call(out, &pad, &format!("openLookup('{}')", escape_ts(control)));
+        }
+        Action::CommitLookup { control } => {
+            call(out, &pad, &format!("commitLookup('{}')", escape_ts(control)));
+        }
+        Action::SelectRow { grid, row } => {
+            call(out, &pad, &format!("selectRow('{}', {})", escape_ts(grid), row));
+        }
+        Action::MarkRow { grid } => {
+            call(out, &pad, &format!("markRow('{}')", escape_ts(grid)));
+        }
+        Action::OpenRow { grid } => {
+            call(out, &pad, &format!("openRow('{}')", escape_ts(grid)));
+        }
+        Action::Filter {
+            control,
+            field,
+            label,
+            operator,
+            value,
+        } => {
+            call(out, &pad, &format!(
+                "filter('{}', '{}', '{}', '{}', {})",
+                escape_ts(control),
+                escape_ts(field),
+                escape_ts(label),
+                escape_ts(operator),
+                value.to_ts()
+            ));
+        }
+        Action::SelectTreeItem { control, path } => {
+            call(out, &pad, &format!(
+                "selectTreeItem('{}', {})",
+                escape_ts(control),
+                path.to_ts()
+            ));
+        }
+        Action::Shortcut { name } => {
+            call(out, &pad, &format!("shortcut('{}')", escape_ts(name)));
+        }
+        Action::CloseForm => call(out, &pad, "closeForm()"),
+        Action::Validate { control, expected } => {
+            call(out, &pad, &format!(
+                "expectValue('{}', {})",
+                escape_ts(control),
+                expected.to_ts()
+            ));
+        }
+        Action::Marker { text } => {
+            line(out, &pad, &format!("// {}", comment_safe(text)));
+        }
+        // Understood and deliberately not replayed. It still leaves a trace in
+        // the generated file: a step that vanishes without a word is
+        // indistinguishable from one the converter never saw.
+        Action::Skipped {
+            raw_kind, detail, ..
+        } => {
+            line(out, &pad, &format!(
+                "// rsat2pw: skipped '{}' - {}",
+                comment_safe(raw_kind),
+                comment_safe(detail)
+            ));
         }
         // `props` carries the untruncated bag for the conversion report; the
         // emitted TODO deliberately uses the short `detail` instead.
@@ -198,6 +256,10 @@ fn emit(action: &Action, indent: usize, on_unsupported: OnUnsupported, out: &mut
             }
         }
     }
+}
+
+fn call(out: &mut String, pad: &str, expr: &str) {
+    line(out, pad, &format!("await d365.{expr};"));
 }
 
 fn line(out: &mut String, pad: &str, text: &str) {
@@ -226,20 +288,31 @@ mod tests {
 
     fn wrap(name: &str, nodes: &str) -> String {
         format!(
-            r#"<AxTaskRecording xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
-                 <Name>{name}</Name><Nodes>{nodes}</Nodes></AxTaskRecording>"#
+            r#"<Recording xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+                 <Name>{name}</Name><RootScope><Children>{nodes}</Children></RootScope></Recording>"#
         )
+    }
+
+    const CLICK: &str = r#"<Node i:type="CommandUserAction"><CommandName>Click</CommandName>
+        <ControlName>SystemDefinedSaveButton</ControlName><ControlType>CommandButton</ControlType></Node>"#;
+
+    const UNKNOWN: &str = r#"<Node i:type="CommandUserAction"><CommandName>Mystery</CommandName>
+        <ControlName>Grid</ControlName><Note>x</Note></Node>"#;
+
+    #[test]
+    fn a_click_carries_its_control_type_through_to_the_runtime() {
+        let spec = generate_from(&wrap("T", CLICK), OnUnsupported::Annotate).spec;
+        assert!(
+            spec.contains("await d365.click('SystemDefinedSaveButton', 'CommandButton');"),
+            "{spec}"
+        );
     }
 
     /// The recording name lands inside a backtick template literal, so a
     /// backtick or a `${` in it would otherwise emit code that does not parse.
     #[test]
     fn recording_name_cannot_break_out_of_the_test_title() {
-        let spec = generate_from(
-            &wrap("Order `x` ${evil}", "<Node i:type=\"CommandUserAction\"><CommandName>Save</CommandName></Node>"),
-            OnUnsupported::Annotate,
-        )
-        .spec;
+        let spec = generate_from(&wrap("Order `x` ${evil}", CLICK), OnUnsupported::Annotate).spec;
 
         assert!(spec.contains(r"test(`Order \`x\` \${evil} [${params.__case}]`"), "{spec}");
     }
@@ -249,7 +322,12 @@ mod tests {
     #[test]
     fn multiline_detail_stays_on_one_comment_line() {
         let spec = generate_from(
-            &wrap("T", "<Node i:type=\"FutureAction\"><Note>one\ntwo</Note></Node>"),
+            &wrap(
+                "T",
+                r#"<Node i:type="CommandUserAction"><CommandName>Mystery</CommandName>
+                   <Note>one
+two</Note></Node>"#,
+            ),
             OnUnsupported::Annotate,
         )
         .spec;
@@ -265,11 +343,7 @@ mod tests {
 
     #[test]
     fn fail_mode_throws_instead_of_annotating() {
-        let spec = generate_from(
-            &wrap("T", "<Node i:type=\"FutureAction\"><Note>x</Note></Node>"),
-            OnUnsupported::Fail,
-        )
-        .spec;
+        let spec = generate_from(&wrap("T", UNKNOWN), OnUnsupported::Fail).spec;
 
         assert!(spec.contains("throw new Error('rsat2pw:"), "{spec}");
         assert!(!spec.contains("annotations.push"), "{spec}");
@@ -277,15 +351,31 @@ mod tests {
 
     #[test]
     fn comment_mode_leaves_only_a_comment() {
-        let spec = generate_from(
-            &wrap("T", "<Node i:type=\"FutureAction\"><Note>x</Note></Node>"),
-            OnUnsupported::Comment,
-        )
-        .spec;
+        let spec = generate_from(&wrap("T", UNKNOWN), OnUnsupported::Comment).spec;
 
         assert!(spec.contains("// TODO(rsat2pw)"), "{spec}");
         assert!(!spec.contains("annotations.push"), "{spec}");
         assert!(!spec.contains("throw new Error"), "{spec}");
+    }
+
+    /// A skipped action still says so in the generated file. Silently dropping
+    /// it would be indistinguishable from never having seen it.
+    #[test]
+    fn a_skipped_action_leaves_a_comment_behind() {
+        let spec = generate_from(
+            &wrap(
+                "T",
+                r#"<Node i:type="CommandUserAction"><CommandName>GetFilters</CommandName>
+                   <ControlName>SystemDefinedFilterManager</ControlName></Node>"#,
+            ),
+            OnUnsupported::Annotate,
+        )
+        .spec;
+
+        assert!(
+            spec.contains("// rsat2pw: skipped 'CommandUserAction:GetFilters'"),
+            "{spec}"
+        );
     }
 
     /// The checked-in example under `tests/` is the converter's own advert. If
@@ -293,17 +383,17 @@ mod tests {
     #[test]
     fn checked_in_example_matches_current_output() {
         let spec = generate_from(
-            include_str!("../fixtures/CreateCustomer.xml"),
+            include_str!("../fixtures/ConfirmPurchaseOrder.xml"),
             OnUnsupported::Annotate,
         )
         .spec;
 
-        let committed = include_str!("../tests/CreateCustomer.spec.ts");
+        let committed = include_str!("../tests/ConfirmPurchaseOrder.spec.ts");
         assert_eq!(
             spec.replace("\r\n", "\n"),
             committed.replace("\r\n", "\n"),
-            "regenerate with: cargo run -- fixtures/CreateCustomer.axtr --out-dir tests \
-             --params fixtures/CreateCustomer-params.xlsx"
+            "regenerate with: cargo run -- fixtures/ConfirmPurchaseOrder.axtr --out-dir tests \
+             --params fixtures/ConfirmPurchaseOrder-params.xlsx"
         );
     }
 }

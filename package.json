@@ -13,7 +13,7 @@
     "generate:otp": "node ./scripts/get-otp.mjs"
   },
   "devDependencies": {
-    "@playwright/test": "^1.49.0",
+    "@playwright/test": "^1.51.0",
     "@types/node": "^26.2.0",
     "typescript": "^5.6.0"
   },

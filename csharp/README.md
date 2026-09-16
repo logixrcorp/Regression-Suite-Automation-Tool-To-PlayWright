@@ -6,21 +6,25 @@ runnable **Playwright** tests. Converter in C#, output in TypeScript.
 
 > ## ⚠️ Read this before you run it
 >
-> **This has never been tested against a real production system.** It was built
-> against *synthetic* schemas modelled on production shapes. Treat the mapping
-> table in `Lower.cs`, the selectors in `Assets/d365.ts`, and every generated
-> spec as a **starting point to verify**, not as working code. Run it against a
-> sandbox or test environment first — never straight at production.
+> **This has never been run against a real D365 environment.** The mapping table
+> in `Lower.cs` is derived from real exported recordings and checked against
+> several of them, but the selectors in `Assets/d365.ts` are informed guesses at
+> how the client renders. Treat every generated spec as a **starting point to
+> verify**, not as working code, and run it against a sandbox or test
+> environment first — never straight at production.
 >
 > **This code is free for everyone.** **Logixr is not responsible if it breaks
 > your systems. Run at your own risk.**
 
 ```
 .axtr (zip) ──► tolerant XML tree ──► RecNode ──► action IR ──► TypeScript
-                  Xml.cs             Recording.cs   Lower.cs     Codegen.cs
+  Recording.xml   Xml.cs            Recording.cs   Lower.cs     Codegen.cs
+                                         │
+                      <RootScope><Children> is the action tree;
+                      <UserActions> is back-references, not actions
 
-RSAT .xlsx parameters ─────────────────────────────► data-driven fixtures
-                            Xlsx.cs / Params.cs
+recorded input values ─────────────────────────────► data-driven fixtures
+RSAT .xlsx parameters       Xlsx.cs / Params.cs
 ```
 
 ## Byte-identical to the Rust build
@@ -36,6 +40,11 @@ That contract has already earned its keep: it caught a real bug in the Rust
 build, which did not normalize CRLF to LF the way XML 1.0 §2.11 requires, and
 so emitted a stray `\r` in every string literal from a Windows-authored
 recording. Both ports now normalize.
+
+It also sets the cost of every mapping change: a rule added here has to be added
+there too, in the same order, down to the ordering of the variables it declares.
+That is the price of the guarantee, and it is worth knowing before you start
+editing `Lower.cs`.
 
 ## Quick start
 
@@ -89,7 +98,7 @@ word).
 dotnet test
 ```
 
-55 tests: the parser, lowering, the workbook reader, codegen escaping, the
+66 tests: the parser, lowering, the workbook reader, codegen escaping, the
 report, and the parity suite that pins output to the Rust build byte for byte.
 
 ## Layout

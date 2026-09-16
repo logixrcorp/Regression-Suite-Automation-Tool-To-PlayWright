@@ -59,11 +59,57 @@ public class ParamsTests
         Assert.Equal("row 1", cases.Rows[0].Label);
         Assert.Equal("row 2", cases.Rows[1].Label);
     }
+
+    /// <summary>
+    /// RSAT's own parameter workbooks have a layout this reader does not
+    /// understand - and reading one as a plain sheet does not fail, it quietly
+    /// builds cases out of the title block. Refusing is the honest answer.
+    /// </summary>
+    [Fact]
+    public void AnRsatParameterWorkbookIsRefusedRatherThanMisread()
+    {
+        var testCase = Lower.Run(RecordingReader.Load(Fixtures.FixturePath("ConfirmPurchaseOrder.xml")));
+        var book = Fixtures.FixturePath("RsatV2-params.xlsx");
+
+        var ex = Assert.Throws<InvalidDataException>(() => Params.FromWorkbook(book, null, testCase));
+        Assert.Contains("RSAT parameter workbook", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("TestCaseSteps", ex.Message, StringComparison.Ordinal);
+
+        // --sheet is the escape hatch, and it still works.
+        Assert.NotNull(Params.FromWorkbook(book, "General", testCase));
+    }
+
+    /// <summary>
+    /// A workbook can have headers and no data rows - a template someone has
+    /// not filled in yet. Emitting a case of blanks from it produces a spec
+    /// that runs, types nothing into every field, and looks healthy doing it.
+    /// Found against a real third-party workbook, which had exactly that shape.
+    /// </summary>
+    [Fact]
+    public void AWorkbookWithNoDataRowsFallsBackToRecordedValues()
+    {
+        var testCase = Lower.Run(RecordingReader.Load(Fixtures.FixturePath("ConfirmPurchaseOrder.xml")));
+
+        var cases = Params.FromWorkbook(
+            Fixtures.FixturePath("EmptyTemplate-params.xlsx"),
+            null,
+            testCase);
+
+        Assert.Single(cases.Rows);
+
+        // The recorder captured this value; the empty template must not erase it.
+        var recorded = testCase.Variables.Single(v => v.Name == "PurchTable_DeliveryDate");
+        Assert.Equal("9/30/2026", recorded.Default);
+        Assert.Equal(recorded.Default, cases.Rows[0].Values["PurchTable_DeliveryDate"]);
+
+        // And the substitution is visible rather than silent.
+        Assert.Contains("no data rows", cases.Source, StringComparison.Ordinal);
+    }
 }
 
 public class XlsxTests
 {
-    private static string Workbook => Fixtures.FixturePath("CreateCustomer-params.xlsx");
+    private static string Workbook => Fixtures.FixturePath("ConfirmPurchaseOrder-params.xlsx");
 
     [Fact]
     public void ReadsSheetNames() =>
@@ -75,9 +121,11 @@ public class XlsxTests
         var table = Xlsx.ReadSheet(Workbook, null);
 
         Assert.Equal(3, table.Count);
-        Assert.Equal(["Case", "Customer account", "Customer name", "Customer group", "Street"], table[0]);
-        Assert.Equal(["domestic retail", "US-9001", "Contoso Retail", "10", "123 Sample Way"], table[1]);
-        Assert.Equal(["export wholesale", "US-9002", "Fabrikam Export", "20", "9 Harbour Rd"], table[2]);
+        Assert.Equal(
+            ["Case", "PurchId", "PurchTable_DeliveryDate", "PurchLine_PurchQty", "PurchParmTable_Printout"],
+            table[0]);
+        Assert.Equal(["confirm with printout", "000123", "9/30/2026", "12", "true"], table[1]);
+        Assert.Equal(["confirm quietly", "000124", "10/14/2026", "3", "false"], table[2]);
     }
 
     [Fact]

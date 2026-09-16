@@ -11,32 +11,42 @@ public class ReportTests
         return Reporter.Build(testCase, Params.FromRecording(testCase));
     }
 
-    private static Report FixtureReport() => ReportFor(Fixtures.FixtureText("CreateCustomer.xml"));
+    private static Report FixtureReport() => ReportFor(Fixtures.FixtureText("ConfirmPurchaseOrder.xml"));
 
     [Fact]
-    public void CountsTranslatedAndUnmappedActions()
+    public void CountsTranslatedSkippedAndUnmappedActions()
     {
         var r = FixtureReport();
 
-        Assert.Equal(18, r.Coverage.Actions);
-        Assert.Equal(1, r.Coverage.NotTranslated);
-        Assert.Equal(17, r.Coverage.Translated);
-        Assert.Equal(94.4, r.Coverage.Percent(), 1);
+        Assert.Equal(r.Coverage.Actions, r.Outline.Count);
+        Assert.Equal(
+            r.Coverage.Actions,
+            r.Coverage.Translated + r.Coverage.Skipped + r.Coverage.NotTranslated);
 
-        Assert.Equal(3, r.TranslatedByOp["setField"]);
-        Assert.Equal(2, r.TranslatedByOp["setGridCell"]);
-        Assert.Equal(4, r.TranslatedByOp["test.step"]);
+        Assert.True(r.TranslatedByOp.ContainsKey("click"));
+        Assert.True(r.TranslatedByOp.ContainsKey("test.step"));
     }
 
+    /// <summary>
+    /// The whole point of the report: an unmapped kind must arrive with the
+    /// properties needed to write its mapping rule.
+    /// </summary>
     [Fact]
     public void UnmappedKindsCarryTheirFullPropertyBag()
     {
-        var kind = Assert.Single(FixtureReport().NotTranslated);
+        var r = ReportFor(Fixtures.Wrap(
+            "T",
+            """
+            <Node i:type="CommandUserAction"><CommandName>SelectForAdd</CommandName>
+            <ControlName>Grid</ControlName><ControlType>Grid</ControlType></Node>
+            """));
 
-        Assert.Equal("ExportToExcelUserAction", kind.RawKind);
+        var kind = Assert.Single(r.NotTranslated);
+
+        Assert.Equal("CommandUserAction:SelectForAdd", kind.RawKind);
         Assert.Equal(1, kind.Count);
-        Assert.Equal("ExportToExcelButton", kind.Props["ControlName"]);
-        Assert.Equal("CustomerV3", kind.Props["OfficeTemplate"]);
+        Assert.Equal("Grid", kind.Props["ControlName"]);
+        Assert.Equal("Grid", kind.Props["ControlType"]);
     }
 
     [Fact]
@@ -57,21 +67,42 @@ public class ReportTests
         Assert.Equal(0, r.Coverage.Translated);
     }
 
+    /// <summary>
+    /// A skipped action is not a translated one. Counting it as translated
+    /// would let the headline number be improved by skipping more.
+    /// </summary>
+    [Fact]
+    public void SkippedActionsGetTheirOwnBucket()
+    {
+        var r = ReportFor(Fixtures.Wrap(
+            "T",
+            """
+            <Node i:type="CommandUserAction"><CommandName>GetFilters</CommandName>
+            <ControlName>SystemDefinedFilterManager</ControlName></Node>
+            """));
+
+        Assert.Equal(1, r.Coverage.Skipped);
+        Assert.Equal(0, r.Coverage.Translated);
+        Assert.Equal(0, r.Coverage.NotTranslated);
+        Assert.Equal("CommandUserAction:GetFilters", r.SkippedKinds[0].RawKind);
+        Assert.Contains("## Skipped", r.ToMarkdown(), StringComparison.Ordinal);
+    }
+
     [Fact]
     public void FlagsVariablesThatNoActionUses()
     {
         var r = ReportFor(
             """
-            <AxTaskRecording xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+            <Recording xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
               <Name>T</Name>
               <Variables>
                 <AxTaskRecordingVariable><Name>Used</Name><Value>a</Value></AxTaskRecordingVariable>
                 <AxTaskRecordingVariable><Name>Orphan</Name><Value>b</Value></AxTaskRecordingVariable>
               </Variables>
-              <Nodes>
-                <Node i:type="InputUserAction"><ControlName>C</ControlName>
+              <RootScope><Children>
+                <Node i:type="PropertyUserAction"><ControlName>C</ControlName>
                   <VariableName>Used</VariableName><Value>a</Value></Node>
-              </Nodes></AxTaskRecording>
+              </Children></RootScope></Recording>
             """);
 
         Assert.True(r.Variables.Single(v => v.Name == "Used").Referenced);
@@ -84,8 +115,8 @@ public class ReportTests
         var r = FixtureReport();
 
         Assert.Contains(r.Outline, e => e.Op == "test.step" && e.Depth == 0);
-        Assert.Contains(r.Outline, e => e.Op == "setField" && e.Depth == 2);
-        Assert.Single(r.Outline, e => !e.Translated);
+        Assert.Contains(r.Outline, e => e.Depth >= 2);
+        Assert.Equal(r.Coverage.NotTranslated, r.Outline.Count(e => !e.Translated && !e.Skipped));
     }
 
     [Fact]
@@ -94,18 +125,19 @@ public class ReportTests
         var r = FixtureReport();
 
         var md = r.ToMarkdown();
-        Assert.Contains("# Conversion report: Create customer", md, StringComparison.Ordinal);
-        Assert.Contains("ExportToExcelUserAction", md, StringComparison.Ordinal);
-        Assert.Contains("| Not translated | 1 |", md, StringComparison.Ordinal);
+        Assert.Contains("# Conversion report: Confirm purchase order", md, StringComparison.Ordinal);
+        Assert.Contains("## Coverage", md, StringComparison.Ordinal);
 
         using var json = JsonDocument.Parse(r.ToJson());
-        Assert.Equal(1, json.RootElement.GetProperty("coverage").GetProperty("not_translated").GetInt32());
+        Assert.Equal(
+            r.Coverage.Actions,
+            json.RootElement.GetProperty("coverage").GetProperty("actions").GetInt32());
     }
 
     [Fact]
     public void EmptyRecordingIsFullyCoveredNotZeroPercent()
     {
-        var r = ReportFor("<AxTaskRecording><Name>T</Name><Nodes/></AxTaskRecording>");
+        var r = ReportFor("<Recording><Name>T</Name><RootScope><Children/></RootScope></Recording>");
 
         Assert.Equal(0, r.Coverage.Actions);
         Assert.Equal(100.0, r.Coverage.Percent());

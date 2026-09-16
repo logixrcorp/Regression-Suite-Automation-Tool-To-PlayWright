@@ -1,5 +1,28 @@
 //! Reads an `.axtr` archive (or a bare recording `.xml`) into a loose node
-//! tree: a kind discriminator, a property bag, and children.
+//! tree: a kind discriminator, a property bag, command arguments, annotations
+//! and children.
+//!
+//! The shape this targets is the real one. A Task Recorder export is a
+//! `DataContract` serialization of `Microsoft.Dynamics.Client.ServerForm.TaskRecording`:
+//!
+//! ```xml
+//! <Recording>
+//!   <Name>Confirm purchase order</Name>
+//!   <RootScope>
+//!     <Children>
+//!       <Node i:type="Scope">...<Children>...</Children></Node>
+//!     </Children>
+//!   </RootScope>
+//!   <UserActions>            <!-- object-graph back-references, not actions -->
+//!     <anyType z:Ref="i3" />
+//!   </UserActions>
+//! </Recording>
+//! ```
+//!
+//! Two details there are load-bearing. The action tree hangs off `RootScope`,
+//! not off a top-level `Nodes`; and `UserActions` is a list of `z:Ref`
+//! pointers into that same tree, so treating it as a second action list yields
+//! a recording made entirely of empty nodes.
 
 use crate::xml::{self, Element};
 use anyhow::{anyhow, Context, Result};
@@ -9,7 +32,7 @@ use std::path::Path;
 
 /// Wrapper elements that hold child nodes. Task Recorder has used several
 /// spellings over the years - including the famously non-English `Childs`.
-const CHILD_WRAPPERS: &[&str] = &["Childs", "Children", "Nodes", "ChildNodes", "Steps"];
+const CHILD_WRAPPERS: &[&str] = &["Children", "Childs", "Nodes", "ChildNodes", "Steps"];
 
 /// Elements that are containers, not actions in their own right.
 const NODE_ELEMENTS: &[&str] = &[
@@ -20,11 +43,42 @@ const NODE_ELEMENTS: &[&str] = &[
     "AxTaskRecordingUserActionNode",
 ];
 
+/// Elements that look node-ish by name but are not actions. `UserActions` is
+/// the dangerous one: it is a flat list of `z:Ref` back-references to nodes
+/// that already appear under `RootScope`, and its name matches every loose
+/// "contains UserAction" test.
+const NOT_NODE_ELEMENTS: &[&str] = &[
+    "UserActions",
+    "Annotations",
+    "Annotation",
+    "Arguments",
+    "CommandArgument",
+    "FormContexts",
+    "NavigationPath",
+    "Variables",
+    "CanonicalUserAction",
+];
+
+/// An `<Annotation i:type="...">` hanging off a node. Kept out of the property
+/// bag on purpose: a `FormAnnotation` carries `MenuItemName`, and flattening
+/// that in would turn an ordinary click into a navigation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecAnnotation {
+    pub kind: String,
+    pub props: BTreeMap<String, String>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct RecNode {
     /// The `i:type` discriminator where present, else the element name.
     pub kind: String,
     pub props: BTreeMap<String, String>,
+    /// `<Arguments><CommandArgument><Value>` in order. These stay out of the
+    /// property bag because a command argument is positional data (often a
+    /// JSON blob), not a property called "Value" - and letting one in makes a
+    /// filter command look exactly like a field edit.
+    pub args: Vec<String>,
+    pub annotations: Vec<RecAnnotation>,
     pub children: Vec<RecNode>,
 }
 
@@ -42,6 +96,15 @@ impl RecNode {
 
     pub fn has_prop(&self, names: &[&str]) -> bool {
         self.prop(names).is_some()
+    }
+
+    /// A property that reads as a boolean `true`.
+    pub fn flag(&self, name: &str) -> bool {
+        self.prop(&[name]).is_some_and(|v| v.eq_ignore_ascii_case("true"))
+    }
+
+    pub fn arg(&self, index: usize) -> Option<&str> {
+        self.args.get(index).map(String::as_str)
     }
 
     pub fn describe(&self) -> String {
@@ -105,17 +168,13 @@ pub fn parse(xml_text: &str) -> Result<Recording> {
 
     let name = doc
         .text_of("Name")
+        .or_else(|| doc.text_of("Description"))
         .or_else(|| doc.text_of("RecordingName"))
         .unwrap_or_else(|| "Recording".to_string());
 
     let variables = collect_variables(&doc);
 
-    let root_container = CHILD_WRAPPERS
-        .iter()
-        .find_map(|w| doc.child(w))
-        .unwrap_or(&doc);
-
-    let nodes = root_container
+    let nodes = action_container(&doc)
         .children
         .iter()
         .filter(|c| is_node_element(c))
@@ -129,10 +188,35 @@ pub fn parse(xml_text: &str) -> Result<Recording> {
     })
 }
 
+/// Find the element whose children are the recording's top-level actions.
+fn action_container(doc: &Element) -> &Element {
+    // The real export: `<RootScope><Children>`. RootScope is itself a scope
+    // node, so its own `Children` is the action list.
+    if let Some(root_scope) = doc.child("RootScope") {
+        return CHILD_WRAPPERS
+            .iter()
+            .find_map(|w| root_scope.child(w))
+            .unwrap_or(root_scope);
+    }
+
+    CHILD_WRAPPERS
+        .iter()
+        .find_map(|w| doc.child(w))
+        .unwrap_or(doc)
+}
+
 fn is_node_element(el: &Element) -> bool {
+    if NOT_NODE_ELEMENTS
+        .iter()
+        .any(|n| el.name.eq_ignore_ascii_case(n))
+    {
+        return false;
+    }
+
+    let lower = el.name.to_ascii_lowercase();
     NODE_ELEMENTS.iter().any(|n| el.name.eq_ignore_ascii_case(n))
-        || el.name.to_ascii_lowercase().contains("node")
-        || el.name.to_ascii_lowercase().contains("useraction")
+        || lower.contains("node")
+        || lower.ends_with("useraction")
 }
 
 fn node_from(el: &Element) -> RecNode {
@@ -143,41 +227,77 @@ fn node_from(el: &Element) -> RecNode {
         .or_else(|| el.text_of("Type"))
         .unwrap_or_else(|| el.name.clone());
 
-    let mut props = BTreeMap::new();
-    let mut children = Vec::new();
-    flatten(el, &mut props, &mut children);
-
-    RecNode {
+    let mut node = RecNode {
         kind,
-        props,
-        children,
-    }
+        props: BTreeMap::new(),
+        args: Vec::new(),
+        annotations: Vec::new(),
+        children: Vec::new(),
+    };
+
+    flatten(el, &mut node);
+    node
 }
 
 /// Pull scalar descendants into the property bag and node-ish descendants into
-/// `children`, transparently stepping through wrapper elements.
-fn flatten(el: &Element, props: &mut BTreeMap<String, String>, children: &mut Vec<RecNode>) {
+/// `children`, transparently stepping through wrapper elements. `Arguments`
+/// and `Annotations` are lifted into their own fields instead.
+fn flatten(el: &Element, node: &mut RecNode) {
     for child in &el.children {
         if CHILD_WRAPPERS.iter().any(|w| child.name.eq_ignore_ascii_case(w)) {
             for grand in &child.children {
                 if is_node_element(grand) {
-                    children.push(node_from(grand));
+                    node.children.push(node_from(grand));
                 } else {
-                    flatten(grand, props, children);
+                    flatten(grand, node);
                 }
             }
+        } else if child.name.eq_ignore_ascii_case("Arguments") {
+            for arg in child.children_named("CommandArgument") {
+                node.args
+                    .push(arg.text_of("Value").unwrap_or_default());
+            }
+        } else if child.name.eq_ignore_ascii_case("Annotations") {
+            for annotation in child.children_named("Annotation") {
+                node.annotations.push(annotation_from(annotation));
+            }
         } else if is_node_element(child) && !child.is_scalar() {
-            children.push(node_from(child));
+            node.children.push(node_from(child));
         } else if child.is_scalar() {
             let text = child.text.trim();
             if !text.is_empty() {
-                props.entry(child.name.clone()).or_insert_with(|| text.to_string());
+                node.props
+                    .entry(child.name.clone())
+                    .or_insert_with(|| text.to_string());
             }
-        } else {
+        } else if !NOT_NODE_ELEMENTS
+            .iter()
+            .any(|n| child.name.eq_ignore_ascii_case(n))
+        {
             // An unrecognized grouping element: keep descending so we do not
             // silently lose the actions underneath it.
-            flatten(child, props, children);
+            flatten(child, node);
         }
+    }
+}
+
+fn annotation_from(el: &Element) -> RecAnnotation {
+    let mut props = BTreeMap::new();
+    for child in &el.children {
+        if child.is_scalar() {
+            let text = child.text.trim();
+            if !text.is_empty() {
+                props.insert(child.name.clone(), text.to_string());
+            }
+        }
+    }
+
+    RecAnnotation {
+        kind: el
+            .attr("type")
+            .map(str::to_string)
+            .unwrap_or_else(|| el.name.clone()),
+        props,
     }
 }
 
@@ -198,19 +318,18 @@ fn collect_variables(doc: &Element) -> Vec<(String, String)> {
     };
 
     fn walk(el: &Element, f: &mut impl FnMut(&Element)) {
-        let lower = el.name.to_ascii_lowercase();
-        if lower.contains("variable") && !lower.ends_with("variables") {
-            f(el);
+        if el.name.eq_ignore_ascii_case("Variables") {
+            for child in &el.children {
+                f(child);
+            }
             return;
         }
-        for c in &el.children {
-            walk(c, f);
+        for child in &el.children {
+            walk(child, f);
         }
     }
 
     walk(doc, &mut visit);
-    out.sort();
-    out.dedup_by(|a, b| a.0 == b.0);
     out
 }
 
@@ -218,44 +337,83 @@ fn collect_variables(doc: &Element) -> Vec<(String, String)> {
 mod tests {
     use super::*;
 
-    const SAMPLE: &str = r#"
-    <AxTaskRecording xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
-      <Name>Create customer</Name>
-      <Variables>
-        <AxTaskRecordingVariable><Name>CustomerName</Name><Value>Contoso</Value></AxTaskRecordingVariable>
-      </Variables>
-      <Nodes>
-        <AxTaskRecordingNode i:type="TaskUserActionGroup">
-          <Annotation>Open the customers list</Annotation>
-          <Childs>
-            <AxTaskRecordingNode i:type="MenuItemUserAction">
-              <MenuItemName>CustTableListPage</MenuItemName>
-              <MenuItemType>Display</MenuItemType>
-            </AxTaskRecordingNode>
-          </Childs>
-        </AxTaskRecordingNode>
-      </Nodes>
-    </AxTaskRecording>"#;
+    const REAL_SHAPE: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<Recording xmlns:i="http://www.w3.org/2001/XMLSchema-instance"
+           xmlns="http://schemas.datacontract.org/2004/07/Microsoft.Dynamics.Client.ServerForm.TaskRecording">
+  <Name>Confirm purchase order</Name>
+  <RootScope z:Id="i1" xmlns:z="http://schemas.microsoft.com/2003/10/Serialization/">
+    <Parent i:nil="true" />
+    <Children>
+      <Node z:Id="i2" i:type="Scope">
+        <Children>
+          <Node z:Id="i3" i:type="CommandUserAction">
+            <Description>Click From journal.</Description>
+            <Annotations>
+              <Annotation i:type="FormAnnotation">
+                <MenuItemName>SysBPMPane</MenuItemName>
+              </Annotation>
+            </Annotations>
+            <Arguments>
+              <CommandArgument><IsReference>false</IsReference><Value>[{"FieldName":"PurchId"}]</Value></CommandArgument>
+              <CommandArgument><IsReference>false</IsReference><Value>1</Value></CommandArgument>
+            </Arguments>
+            <CommandName>Click</CommandName>
+            <ControlName>PurchCopyJournalHeader</ControlName>
+            <ControlType>MenuItemButton</ControlType>
+          </Node>
+        </Children>
+        <IsForm>false</IsForm>
+        <IsStepGroup>true</IsStepGroup>
+        <Name>Copy from journal</Name>
+      </Node>
+    </Children>
+  </RootScope>
+  <UserActions xmlns:d2p1="http://schemas.microsoft.com/2003/10/Serialization/Arrays">
+    <d2p1:anyType z:Ref="i3" xmlns:z="http://schemas.microsoft.com/2003/10/Serialization/" />
+  </UserActions>
+  <Version>1</Version>
+</Recording>"#;
 
+    /// The action tree hangs off `RootScope`, and `UserActions` is a list of
+    /// back-references to nodes already in it. Reading the latter as the
+    /// action list is how a real recording converts to nothing at all.
     #[test]
-    fn reads_name_variables_and_nested_nodes() {
-        let rec = parse(SAMPLE).unwrap();
-        assert_eq!(rec.name, "Create customer");
-        assert_eq!(rec.variables, vec![("CustomerName".into(), "Contoso".into())]);
-        assert_eq!(rec.nodes.len(), 1);
+    fn reads_the_action_tree_from_root_scope_and_ignores_user_actions() {
+        let rec = parse(REAL_SHAPE).unwrap();
 
-        let group = &rec.nodes[0];
-        assert_eq!(group.kind, "TaskUserActionGroup");
-        assert_eq!(group.prop(&["Annotation"]), Some("Open the customers list"));
-        assert_eq!(group.children.len(), 1);
-        assert_eq!(group.children[0].prop(&["MenuItemName"]), Some("CustTableListPage"));
+        assert_eq!(rec.name, "Confirm purchase order");
+        assert_eq!(rec.nodes.len(), 1, "UserActions must not become a node");
+
+        let scope = &rec.nodes[0];
+        assert_eq!(scope.kind, "Scope");
+        assert!(scope.flag("IsStepGroup"));
+        assert_eq!(scope.children.len(), 1);
     }
 
+    /// A command argument is positional data, frequently a JSON blob. Letting
+    /// it into the property bag as "Value" makes a filter command
+    /// indistinguishable from a field edit.
     #[test]
-    fn tolerates_alternate_wrapper_spellings() {
-        let alt = SAMPLE.replace("Childs", "Children").replace("Nodes", "Steps");
-        let rec = parse(&alt).unwrap();
-        assert_eq!(rec.nodes.len(), 1);
-        assert_eq!(rec.nodes[0].children.len(), 1);
+    fn command_arguments_stay_out_of_the_property_bag() {
+        let node = &parse(REAL_SHAPE).unwrap().nodes[0].children[0];
+
+        assert_eq!(node.prop(&["Value"]), None);
+        assert_eq!(node.arg(0), Some(r#"[{"FieldName":"PurchId"}]"#));
+        assert_eq!(node.arg(1), Some("1"));
+    }
+
+    /// A `FormAnnotation` carries `MenuItemName`. Flattened into the property
+    /// bag it would turn this click into a navigation.
+    #[test]
+    fn annotations_stay_out_of_the_property_bag() {
+        let node = &parse(REAL_SHAPE).unwrap().nodes[0].children[0];
+
+        assert_eq!(node.prop(&["MenuItemName"]), None);
+        assert_eq!(node.annotations.len(), 1);
+        assert_eq!(node.annotations[0].kind, "FormAnnotation");
+        assert_eq!(
+            node.annotations[0].props.get("MenuItemName").map(String::as_str),
+            Some("SysBPMPane")
+        );
     }
 }
