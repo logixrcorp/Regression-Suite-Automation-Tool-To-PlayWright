@@ -256,6 +256,38 @@ public class LowerTests
     }
 
     /// <summary>
+    /// From a real customer recording: four of these arrive in a row directly
+    /// after <c>navigate</c>, before the first click in the whole file. That is
+    /// a page rendering its FactBoxes, not a user opening four parts by hand.
+    /// </summary>
+    [Fact]
+    public void AFormPartRenderingIsSkippedAndItsFilterScopeFlattened()
+    {
+        var actions = Fixtures.LowerXml(
+            """
+            <Node i:type="CommandUserAction"><CommandName>OpenFormPart</CommandName>
+              <ControlName>EcoResProductVariantsPerCompanyPart</ControlName>
+              <ControlType>Part</ControlType></Node>
+            <Node i:type="Scope">
+              <IsForm>true</IsForm><IsStepGroup>false</IsStepGroup>
+              <Name>__partlinkfilter_RetailItemChannelFactBox</Name><ScopeType>Public</ScopeType>
+              <Children>
+                <Node i:type="CommandUserAction"><CommandName>Click</CommandName>
+                  <ControlName>InventItemOrderSetupAction</ControlName>
+                  <ControlType>MenuItemButton</ControlType></Node>
+              </Children>
+            </Node>
+            """);
+
+        var skipped = Assert.IsType<Action.Skipped>(actions[0]);
+        Assert.Equal("CommandUserAction:OpenFormPart", skipped.RawKind);
+
+        // The filter scope is the client's own: its child is lifted out rather
+        // than nested inside a form nobody navigated to.
+        Assert.Equal(new Action.Click("InventItemOrderSetupAction", "MenuItemButton"), actions[1]);
+    }
+
+    /// <summary>
     /// Verbs the recorder emits that our own corpus of recordings happens not
     /// to contain. They were found in another converter's dispatch table -
     /// written against a different set of recordings - which is the only way

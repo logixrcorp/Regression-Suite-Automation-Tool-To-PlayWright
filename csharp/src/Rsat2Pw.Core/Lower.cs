@@ -19,6 +19,13 @@ public static class Lower
     private static readonly string[] LabelKeys = ["Description", "CustomDescription", "Annotation", "Name"];
 
     /// <summary>
+    /// Scopes the client generates around a FactBox's part-link filter. They
+    /// are not forms anyone navigated to, and a page with four FactBoxes
+    /// buries its real actions four levels deep in them.
+    /// </summary>
+    private const string PartLinkFilterPrefix = "__partlinkfilter_";
+
+    /// <summary>
     /// Forms that belong to the recorder, not to the business process. Task
     /// Recorder runs inside the client it is recording, so its own pane shows
     /// up as a form scope wrapped around perfectly ordinary actions.
@@ -231,7 +238,8 @@ public static class Lower
     }
 
     private static bool IsRecorderInternal(string form) =>
-        RecorderInternalForms.Any(f => string.Equals(f, form, StringComparison.OrdinalIgnoreCase));
+        form.StartsWith(PartLinkFilterPrefix, StringComparison.OrdinalIgnoreCase)
+        || RecorderInternalForms.Any(f => string.Equals(f, form, StringComparison.OrdinalIgnoreCase));
 
     private static Action LowerMenuItem(RecNode node)
     {
@@ -337,6 +345,14 @@ public static class Lower
             // applying one, so replaying this would just toggle the pane shut.
             case "getfilters":
                 return Skipped(node, "opens the filter pane; filter() does that itself");
+
+            // A FactBox coming up as its page loads. In every recording to hand
+            // these arrive in a run immediately after navigation, before the
+            // first gesture - so there is no click to replay, and waiting for
+            // the part is what the runtime already does before touching
+            // anything on it.
+            case "openformpart":
+                return Skipped(node, "a form part rendering; navigation brings it up");
 
             case "requestclose":
                 return new Action.CloseForm();

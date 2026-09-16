@@ -61,6 +61,31 @@ jobs:
       - run: dotnet build --configuration Release
       - run: dotnet test --configuration Release --no-build
 
+  # The PowerShell port. Its parity suite pins output to the Rust build byte
+  # for byte, the same contract the C# port is held to.
+  powershell:
+    name: powershell (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: PowerShell 7
+        shell: pwsh
+        run: ./powershell/tests/Run-Tests.ps1
+
+      # Windows PowerShell 5.1 is a different engine - it reads a .ps1 as ANSI
+      # rather than UTF-8, runs on .NET Framework, and lacks most of the syntax
+      # added since. It is also what is actually installed on the machines this
+      # implementation exists for, so it is not optional.
+      - name: Windows PowerShell 5.1
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: ./powershell/tests/Run-Tests.ps1
+
   # The output: the generated specs must typecheck and actually run. Both
   # platforms, deliberately - the mock harness has already shipped one
   # Linux-only browser path that made this suite unrunnable on Windows.
