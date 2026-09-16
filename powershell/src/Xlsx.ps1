@@ -59,6 +59,7 @@ function Read-XlsxSheet {
 function Open-XlsxArchive {
     param([Parameter(Mandatory)] [string] $Path)
 
+    $Path = Resolve-FullPath -Path $Path
     if (-not (Test-Path -LiteralPath $Path)) { throw "opening ${Path}: file not found" }
 
     Add-Type -AssemblyName System.IO.Compression -ErrorAction SilentlyContinue

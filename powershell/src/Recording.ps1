@@ -121,11 +121,12 @@ function Import-Recording {
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string] $Path)
 
-    if (-not (Test-Path -LiteralPath $Path)) {
+    $full = Resolve-FullPath -Path $Path
+    if (-not (Test-Path -LiteralPath $full)) {
         throw "reading ${Path}: file not found"
     }
 
-    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    $bytes = [System.IO.File]::ReadAllBytes($full)
 
     if ($bytes.Length -ge 2 -and $bytes[0] -eq 0x50 -and $bytes[1] -eq 0x4B) {
         $xmlText = Read-RecordingFromArchive -Bytes $bytes

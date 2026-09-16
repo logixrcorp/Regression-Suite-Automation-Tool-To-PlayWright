@@ -66,6 +66,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $here 'src/Paths.ps1')
 . (Join-Path $here 'src/Xml.ps1')
 . (Join-Path $here 'src/Ir.ps1')
 . (Join-Path $here 'src/Recording.ps1')
@@ -92,6 +93,15 @@ function Write-GeneratedFile {
 }
 
 try {
+    # PowerShell's location and .NET's working directory are different things,
+    # so the paths written to go through Resolve-FullPath first. The paths read
+    # from are resolved inside the functions that open them, and deliberately
+    # left as typed here: the workbook path is echoed into the generated data
+    # module's source line, and the other two implementations print it exactly
+    # as it was given.
+    $OutDir = Resolve-FullPath -Path $OutDir
+    if (-not [string]::IsNullOrEmpty($Report)) { $Report = Resolve-FullPath -Path $Report }
+
     $recording = Import-Recording -Path $Path
     $testCase = ConvertTo-IrTestCase -Recording $recording
 

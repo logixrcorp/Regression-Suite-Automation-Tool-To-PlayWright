@@ -21,6 +21,7 @@ $ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $root = Split-Path -Parent (Split-Path -Parent $here)
 
+. (Join-Path $here '../src/Paths.ps1')
 . (Join-Path $here '../src/Xml.ps1')
 . (Join-Path $here '../src/Ir.ps1')
 . (Join-Path $here '../src/Recording.ps1')
@@ -111,6 +112,30 @@ Test-Case 'the generated file name matches the Rust output' {
     $case = Get-FixtureCase
     $output = ConvertTo-PlaywrightSpec -TestCase $case -Cases (Get-CasesFromRecording -TestCase $case)
     Assert-Equal 'ConfirmPurchaseOrder' $output.Stem
+}
+
+Test-Case 'a relative -OutDir resolves where the shell is, not where .NET thinks it is' {
+    # Reported from the field: `-OutDir .\Out` created the directory under the
+    # current location and then tried to write the spec to the user's home
+    # directory, because PowerShell's location and [Environment]::CurrentDirectory
+    # are different things and System.IO only knows about the second.
+    $sandbox = Join-Path ([System.IO.Path]::GetTempPath()) "rsat2pw-cwd-$([System.Guid]::NewGuid().ToString('N'))"
+    [void] (New-Item -ItemType Directory -Path $sandbox -Force)
+
+    try {
+        Push-Location $sandbox
+        try {
+            & (Join-Path $root 'powershell/rsat2pw.ps1') `
+                -Path (Join-Path $root 'fixtures/ConfirmPurchaseOrder.axtr') `
+                -OutDir '.\Out' `
+                -NoReport 2>$null | Out-Null
+        }
+        finally { Pop-Location }
+
+        $expected = Join-Path $sandbox 'Out/ConfirmPurchaseOrder.spec.ts'
+        Assert-True (Test-Path -LiteralPath $expected) "the spec should be written under the shell's location, at $expected"
+    }
+    finally { Remove-Item $sandbox -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
 Write-Host 'the mapping table'
