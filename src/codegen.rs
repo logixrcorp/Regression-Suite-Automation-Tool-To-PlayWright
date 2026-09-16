@@ -206,8 +206,18 @@ fn emit(action: &Action, indent: usize, on_unsupported: OnUnsupported, out: &mut
                 path.to_ts()
             ));
         }
+        Action::ExpandTreeItem { control, path } => {
+            call(out, &pad, &format!(
+                "expandTreeItem('{}', {})",
+                escape_ts(control),
+                path.to_ts()
+            ));
+        }
         Action::Shortcut { name } => {
             call(out, &pad, &format!("shortcut('{}')", escape_ts(name)));
+        }
+        Action::ResetFilters { control } => {
+            call(out, &pad, &format!("resetFilters('{}')", escape_ts(control)));
         }
         Action::CloseForm => call(out, &pad, "closeForm()"),
         Action::Validate { control, expected } => {

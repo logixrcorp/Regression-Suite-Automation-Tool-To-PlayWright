@@ -276,7 +276,9 @@ public static class Lower
             case "markactiverow" when grid.Length > 0:
                 return new Action.MarkRow(grid);
 
+            // `ChangeSelectedIndex` is the same move without the cache suffix.
             case "changeselectedindexincache" when grid.Length > 0:
+            case "changeselectedindex" when grid.Length > 0:
             {
                 // The new cursor position is the first command argument.
                 var row = int.TryParse(
@@ -290,8 +292,31 @@ public static class Lower
                 return new Action.SelectRow(grid, row);
             }
 
+            // `ApplyFilters` is the same command under an older name, and
+            // carries the same JSON payload. If it ever does not, LowerFilter
+            // finds no field and says so rather than emitting a filter of
+            // nothing.
             case "applyfiltersfortaskrecorder":
+            case "applyfilters":
                 return LowerFilter(node, ctx, control);
+
+            case "resetfilters":
+                return new Action.ResetFilters(control);
+
+            // Preparing the filter pane so a field can be filtered on.
+            // filter() drives the column header directly and never needs the
+            // pane set up, so replaying this would only open UI nothing else
+            // touches.
+            case "addafilterfield":
+                return Skipped(node, "prepares the filter pane; filter() does not use it");
+
+            // Following a link rendered inside a field. The target is the
+            // control, exactly as for an ordinary click.
+            case "executehyperlink" when control.Length > 0:
+                return new Action.Click(control, controlType);
+
+            case "expandingpath" when control.Length > 0:
+                return new Action.ExpandTreeItem(control, ctx.Derived(control, node.Arg(0) ?? ""));
 
             case "selectionpathchanged" when control.Length > 0:
                 // The tree path is the value the user picked, so it is test

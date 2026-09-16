@@ -256,6 +256,46 @@ public class LowerTests
     }
 
     /// <summary>
+    /// Verbs the recorder emits that our own corpus of recordings happens not
+    /// to contain. They were found in another converter's dispatch table -
+    /// written against a different set of recordings - which is the only way
+    /// to extend this list short of a published enumeration, and there is not
+    /// one.
+    /// </summary>
+    [Fact]
+    public void VerbsLearnedFromAnotherCorpus()
+    {
+        var actions = Fixtures.LowerXml(
+            """
+            <Node i:type="CommandUserAction">
+              <Arguments><CommandArgument><Value>2</Value></CommandArgument></Arguments>
+              <CommandName>ChangeSelectedIndex</CommandName>
+              <ListContext>Grid</ListContext><ControlName>Grid</ControlName></Node>
+            <Node i:type="CommandUserAction"><CommandName>ExecuteHyperlink</CommandName>
+              <ControlName>PurchTable_PurchId</ControlName><ControlType>Input</ControlType></Node>
+            <Node i:type="CommandUserAction">
+              <Arguments><CommandArgument><Value>ALL (ALL)</Value></CommandArgument></Arguments>
+              <CommandName>ExpandingPath</CommandName><ControlName>ctrlFormTree</ControlName></Node>
+            <Node i:type="CommandUserAction"><CommandName>ResetFilters</CommandName>
+              <ControlName>SystemDefinedFilterManager</ControlName></Node>
+            <Node i:type="CommandUserAction"><CommandName>AddAFilterField</CommandName>
+              <ControlName>SystemDefinedFilterManager</ControlName></Node>
+            """);
+
+        // The two aliases land on the rules their longer-named twins use.
+        Assert.Equal(new Action.SelectRow("Grid", 2), actions[0]);
+        Assert.Equal(new Action.Click("PurchTable_PurchId", "Input"), actions[1]);
+
+        var expand = Assert.IsType<Action.ExpandTreeItem>(actions[2]);
+        Assert.Equal("ctrlFormTree", expand.Control);
+
+        Assert.Equal(new Action.ResetFilters("SystemDefinedFilterManager"), actions[3]);
+
+        // Preparing the filter pane is understood and deliberately not replayed.
+        Assert.IsType<Action.Skipped>(actions[4]);
+    }
+
+    /// <summary>
     /// Microsoft's CDM schema for the task recorder tables
     /// (<c>SysTaskRecorderNode*</c>) lists node types that none of the real
     /// recordings available to test against contain: a recorded note, a

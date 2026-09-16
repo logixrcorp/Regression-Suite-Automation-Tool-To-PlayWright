@@ -293,12 +293,31 @@ fn lower_command(node: &RecNode, ctx: &mut Ctx) -> Action {
         "resolvechanges" if !control.is_empty() => Action::CommitLookup { control },
         "navigationaction" if !grid.is_empty() => Action::OpenRow { grid },
         "markactiverow" if !grid.is_empty() => Action::MarkRow { grid },
-        "changeselectedindexincache" if !grid.is_empty() => Action::SelectRow {
+        // `ChangeSelectedIndex` is the same move without the cache suffix.
+        "changeselectedindexincache" | "changeselectedindex" if !grid.is_empty() => Action::SelectRow {
             grid,
             // The new cursor position is the first command argument.
             row: node.arg(0).and_then(|a| a.trim().parse().ok()).unwrap_or(0),
         },
-        "applyfiltersfortaskrecorder" => lower_filter(node, ctx, control),
+        // `ApplyFilters` is the same command under an older name, and carries
+        // the same JSON payload. If it ever does not, `lower_filter` finds no
+        // field and says so rather than emitting a filter of nothing.
+        "applyfiltersfortaskrecorder" | "applyfilters" => lower_filter(node, ctx, control),
+        "resetfilters" => Action::ResetFilters { control },
+        // Preparing the filter pane so a field can be filtered on. `filter()`
+        // drives the column header directly and never needs the pane set up,
+        // so replaying this would only open UI nothing else touches.
+        "addafilterfield" => skipped(node, "prepares the filter pane; filter() does not use it"),
+        // Following a link rendered inside a field. The target is the control,
+        // exactly as for an ordinary click.
+        "executehyperlink" if !control.is_empty() => Action::Click {
+            control,
+            control_type,
+        },
+        "expandingpath" if !control.is_empty() => Action::ExpandTreeItem {
+            path: ctx.derived(&control, node.arg(0).unwrap_or_default()),
+            control,
+        },
         "selectionpathchanged" if !control.is_empty() => Action::SelectTreeItem {
             // The tree path is the value the user picked, so it is test data
             // like any other recorded input.
@@ -871,6 +890,57 @@ mod tests {
                 }
             ]
         );
+    }
+
+
+    /// Verbs the recorder emits that our own corpus of recordings happens not
+    /// to contain. They were found in another converter's dispatch table -
+    /// written against a different set of recordings - which is the only way
+    /// to extend this list short of a published enumeration, and there is not
+    /// one.
+    #[test]
+    fn verbs_learned_from_another_corpus() {
+        let a = actions(
+            r#"<Node i:type="CommandUserAction">
+                 <Arguments><CommandArgument><Value>2</Value></CommandArgument></Arguments>
+                 <CommandName>ChangeSelectedIndex</CommandName>
+                 <ListContext>Grid</ListContext><ControlName>Grid</ControlName></Node>
+               <Node i:type="CommandUserAction"><CommandName>ExecuteHyperlink</CommandName>
+                 <ControlName>PurchTable_PurchId</ControlName><ControlType>Input</ControlType></Node>
+               <Node i:type="CommandUserAction">
+                 <Arguments><CommandArgument><Value>ALL (ALL)</Value></CommandArgument></Arguments>
+                 <CommandName>ExpandingPath</CommandName><ControlName>ctrlFormTree</ControlName></Node>
+               <Node i:type="CommandUserAction"><CommandName>ResetFilters</CommandName>
+                 <ControlName>SystemDefinedFilterManager</ControlName></Node>
+               <Node i:type="CommandUserAction"><CommandName>AddAFilterField</CommandName>
+                 <ControlName>SystemDefinedFilterManager</ControlName></Node>"#,
+        );
+
+        // The two aliases land on the rules their longer-named twins use.
+        assert_eq!(
+            a[0],
+            Action::SelectRow {
+                grid: "Grid".into(),
+                row: 2
+            }
+        );
+        assert_eq!(
+            a[1],
+            Action::Click {
+                control: "PurchTable_PurchId".into(),
+                control_type: "Input".into()
+            }
+        );
+        assert!(matches!(&a[2], Action::ExpandTreeItem { control, .. } if control == "ctrlFormTree"));
+        assert_eq!(
+            a[3],
+            Action::ResetFilters {
+                control: "SystemDefinedFilterManager".into()
+            }
+        );
+
+        // Preparing the filter pane is understood and deliberately not replayed.
+        assert!(matches!(&a[4], Action::Skipped { .. }));
     }
 
     /// Microsoft's CDM schema for the task recorder tables

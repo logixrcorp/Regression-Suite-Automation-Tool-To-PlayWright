@@ -48,6 +48,10 @@ const SELECTORS: Record<string, string[]> = {
     'button[name="{name}"]',
     'button[data-dyn-controlname="{name}"]',
     '[data-dyn-controlname="{name}"] button',
+    // An action-pane command that does not fit collapses into an overflow
+    // menu, which the client renders outside the form that owns it.
+    '.overflow-menu button[name="{name}"]',
+    '[class*="overflow-menu"] button[name="{name}"]',
     '[data-dyn-controlname="{name}"]',
   ],
   input: [
@@ -61,6 +65,10 @@ const SELECTORS: Record<string, string[]> = {
     'input[type="checkbox"][name="{name}"]',
     '[data-dyn-controlname="{name}"] input[type="checkbox"]',
     '[data-dyn-controlname="{name}"] .toggle-box',
+    // A styled checkbox is a span carrying the control name in its id, not an
+    // input carrying it in a name attribute.
+    'span[id*="{name}"].toggle-box',
+    'span[id*="{name}"].checkBox',
     '[data-dyn-controlname="{name}"]',
   ],
   tab: [
@@ -73,6 +81,18 @@ const SELECTORS: Record<string, string[]> = {
     '[data-dyn-controlname="{name}"]',
     '[role="grid"][data-dyn-controlname="{name}"]',
     '[data-dyn-controlname="{name}"] [role="grid"]',
+  ],
+  tree: [
+    '[data-dyn-controlname="{name}"]',
+    '[role="tree"][data-dyn-controlname="{name}"]',
+    '[data-dyn-controlname="{name}"] [role="tree"]',
+    '[id*="{name}"][role="tree"]',
+  ],
+  listbox: [
+    '[data-dyn-controlname="{name}"] ul',
+    'ul[id*="{name}"]',
+    'ul[aria-labelledby*="{name}"]',
+    '[data-dyn-controlname="{name}"]',
   ],
   // Anything the recorder gave no type for, or a type not listed below.
   generic: [
@@ -112,18 +132,24 @@ const CONTROL_FAMILY: Record<string, keyof typeof SELECTORS> = {
   quickfilter: 'input',
   filtermanager: 'input',
   checkbox: 'checkbox',
+  radiobutton: 'checkbox',
   appbartab: 'tab',
   pivotitem: 'tab',
   sectionpage: 'tab',
   tab: 'tab',
   grid: 'grid',
   reactgrid: 'grid',
+  tree: 'tree',
+  listbox: 'listbox',
 };
 
 /**
  * Grid rows. The client virtualizes them, so only rendered rows exist, and the
  * row element carries a 1-based `aria-rowindex` while the recorder counts from
  * zero - hence `row + 1`.
+ *
+ * This one convention is corroborated: another D365 automation project, run
+ * against a live environment, addresses rows the same way.
  */
 const GRID_ROW_SELECTORS = (row: number): string[] => [
   `[aria-rowindex="${row + 1}"]`,
@@ -535,6 +561,14 @@ export class D365 {
    * not stop the one below it from being reachable.
    */
   async selectTreeItem(controlName: string, path: string): Promise<void> {
+    await this.walkTree(controlName, path, { selectLast: true });
+  }
+
+  private async walkTree(
+    controlName: string,
+    path: string,
+    { selectLast }: { selectLast: boolean },
+  ): Promise<void> {
     const tree = await this.locate(controlName, 'Tree');
     const segments = path.split('\\').filter((segment) => segment.trim().length > 0);
 
@@ -544,7 +578,7 @@ export class D365 {
 
     for (const [index, segment] of segments.entries()) {
       const node = await this.treeNode(tree, segment, controlName, path);
-      const last = index === segments.length - 1;
+      const last = index === segments.length - 1 && selectLast;
 
       if (last) {
         await node.click();
@@ -607,6 +641,34 @@ export class D365 {
     }
 
     return undefined;
+  }
+
+  /**
+   * `CommandName=ExpandingPath` - open a branch of a tree without selecting
+   * it. Every segment on the way down is opened, the last one included.
+   */
+  async expandTreeItem(controlName: string, path: string): Promise<void> {
+    await this.walkTree(controlName, path, { selectLast: false });
+  }
+
+  /** `CommandName=ResetFilters` - clear the filter pane. */
+  async resetFilters(controlName: string): Promise<void> {
+    const reset = this.page
+      .locator('button, [role="button"]')
+      .filter({ hasText: /^\s*Reset\s*$/ })
+      .filter({ visible: true })
+      .first();
+
+    if (await reset.count()) {
+      await reset.click();
+      await this.waitForIdle();
+      return;
+    }
+
+    // No pane open: the filter manager itself carries the reset affordance.
+    const manager = await this.locate(controlName, 'FilterManager');
+    await manager.click();
+    await this.waitForIdle();
   }
 
   /**
@@ -781,9 +843,13 @@ export class D365 {
     await header.click();
     await this.waitForIdle();
 
+    // `.sysPopup` is the client's generic popup class - an overflow menu is one
+    // too - so the flyout is identified by what it contains rather than by its
+    // class alone.
     const flyout = this.page
       .locator('.filterFlyout, .sysPopup, [role="dialog"]')
       .filter({ visible: true })
+      .filter({ has: this.page.locator('input:not([type="checkbox"]), textarea') })
       .last();
 
     if (operator) {

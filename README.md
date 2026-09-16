@@ -222,15 +222,24 @@ are flattened away, since they are plumbing rather than intent.
 | `PropertyUserAction` | `setField()` / `setGridCell()` |
 | `Click`, `TabShown` | `click()`, `tab()` |
 | `RequestPopup`, `ResolveChanges` | `openLookup()`, `commitLookup()` |
-| `ChangeSelectedIndexInCache`, `MarkActiveRow`, `NavigationAction` | `selectRow()`, `markRow()`, `openRow()` |
-| `ApplyFiltersForTaskRecorder` | `filter()`, unpacked from its JSON argument |
-| `SelectionPathChanged` | `selectTreeItem()`, walking the recorded tree path |
+| `ChangeSelectedIndexInCache` / `ChangeSelectedIndex`, `MarkActiveRow`, `NavigationAction` | `selectRow()`, `markRow()`, `openRow()` |
+| `ApplyFiltersForTaskRecorder` / `ApplyFilters` | `filter()`, unpacked from its JSON argument |
+| `ResetFilters` | `resetFilters()` |
+| `SelectionPathChanged`, `ExpandingPath` | `selectTreeItem()` / `expandTreeItem()`, walking the recorded tree path |
+| `ExecuteHyperlink` | `click()` — following a link rendered inside a field |
 | `ExecuteShortcuts` | `shortcut()` — e.g. the View/Edit toggle |
 | `RequestClose` | `closeForm()` |
 | `ValidationUserAction` | `expectValue()`, with the expected value as test data |
 | `TaskUserAction`, `InfoUserAction`, `AnnotationUserAction` | a comment — a sub-task boundary, or a note written while recording |
 
 Anything else becomes a `TODO(rsat2pw)` naming the verb that has no rule yet.
+
+Some of those rules exist for verbs that appear in *none* of the recordings
+above. There is no published list of the command names the recorder emits — the
+node types are in Microsoft's CDM schema, the verbs are not — so the only way to
+extend the table is to pool what different corpora turn up. Several rules here
+were learned from another converter's dispatch table, written against recordings
+we do not have.
 
 **What is deliberately left unmapped**, and why — these are judgement calls, not
 oversights:

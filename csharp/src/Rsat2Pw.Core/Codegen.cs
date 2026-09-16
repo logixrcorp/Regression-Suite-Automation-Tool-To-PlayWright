@@ -216,8 +216,16 @@ public static class Codegen
                 Call(output, pad, $"selectTreeItem('{Ir.EscapeTs(a.Control)}', {a.Path.ToTs()})");
                 break;
 
+            case Action.ExpandTreeItem a:
+                Call(output, pad, $"expandTreeItem('{Ir.EscapeTs(a.Control)}', {a.Path.ToTs()})");
+                break;
+
             case Action.Shortcut a:
                 Call(output, pad, $"shortcut('{Ir.EscapeTs(a.Name)}')");
+                break;
+
+            case Action.ResetFilters a:
+                Call(output, pad, $"resetFilters('{Ir.EscapeTs(a.Control)}')");
                 break;
 
             case Action.CloseForm:

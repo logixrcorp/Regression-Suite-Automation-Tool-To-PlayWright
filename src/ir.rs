@@ -155,10 +155,20 @@ pub enum Action {
         control: String,
         path: Value,
     },
+    /// `CommandName=ExpandingPath` - open a branch of a tree without
+    /// selecting it.
+    ExpandTreeItem {
+        control: String,
+        path: Value,
+    },
     /// `CommandName=ExecuteShortcuts` - a named client shortcut, such as the
     /// one that flips a page between View and Edit mode.
     Shortcut {
         name: String,
+    },
+    /// `CommandName=ResetFilters` - clear the filter pane.
+    ResetFilters {
+        control: String,
     },
     /// `CommandName=RequestClose`.
     CloseForm,
@@ -213,7 +223,9 @@ impl Action {
             Action::OpenRow { .. } => "openRow",
             Action::Filter { .. } => "filter",
             Action::SelectTreeItem { .. } => "selectTreeItem",
+            Action::ExpandTreeItem { .. } => "expandTreeItem",
             Action::Shortcut { .. } => "shortcut",
+            Action::ResetFilters { .. } => "resetFilters",
             Action::CloseForm => "closeForm",
             Action::Validate { .. } => "expectValue",
             Action::Marker { .. } => "marker",
@@ -251,10 +263,12 @@ impl Action {
                 value,
                 ..
             } => format!("{field} {operator} {}", value.to_ts()),
-            Action::SelectTreeItem { control, path } => {
+            Action::SelectTreeItem { control, path }
+            | Action::ExpandTreeItem { control, path } => {
                 format!("{control} <- {}", path.to_ts())
             }
             Action::Shortcut { name } => name.clone(),
+            Action::ResetFilters { control } => control.clone(),
             Action::CloseForm => String::new(),
             Action::Validate { control, expected } => {
                 format!("{control} == {}", expected.to_ts())
