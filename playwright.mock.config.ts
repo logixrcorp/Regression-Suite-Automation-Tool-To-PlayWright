@@ -9,10 +9,14 @@ import { defineConfig } from '@playwright/test';
 const MOCK_URL = process.env.D365_BASE_URL || 'http://127.0.0.1:3999';
 
 export default defineConfig({
-  testDir: './tests',
+  // Both the generated specs and the runtime helper's own tests. The latter
+  // live under mock/ so that the real-environment config, which only looks at
+  // tests/, never tries to run them against a live instance.
+  testDir: '.',
+  testMatch: ['tests/*.spec.ts', 'mock/*.spec.ts'],
   // The mock has no identity provider, so the sign-in setup project must not
-  // run here. Default testMatch already skips *.setup.ts; this is explicit so
-  // it stays that way.
+  // run here. testMatch already excludes *.setup.ts; this is explicit so it
+  // stays that way.
   testIgnore: /.*\.setup\.ts/,
   timeout: 60_000,
   expect: { timeout: 10_000 },

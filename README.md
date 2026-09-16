@@ -355,7 +355,7 @@ reporting a missing D365 form.
 | `tests/` | generated specs, plus the sign-in setup projects |
 | `constants/` | auth file path and credential resolution |
 | `fixtures/` | the synthetic recording and its parameter workbook |
-| `mock/` | stand-in D365 page used by the self-test harness |
+| `mock/` | stand-in D365 page, and the runtime helper's own tests |
 | `scripts/` | TOTP code generator |
 
 ### Where the two implementations correspond
@@ -459,10 +459,28 @@ the converter and runtime helper can be proven end to end without a live
 environment.
 
 It reproduces the *shape* of that contract rather than a convenient
-simplification of it, which is the only way it earns anything. It already has
-twice: the idle wait originally checked whether the blocking overlay *existed*
-rather than whether it was *visible*, which would have hung forever against real
-D365, since the client keeps that element in the DOM permanently.
+simplification of it, which is the only way it earns anything. It has now done
+so three times: the idle wait originally checked whether the blocking overlay
+*existed* rather than whether it was *visible*, which would have hung forever
+against real D365; a tree path selected the ancestor that *contained* the node
+rather than the node; and adding an overflow menu revealed that `.sysPopup` is
+the client's generic popup class, so the filter flyout was matching a menu.
+
+Four parts of it exist purely to be hostile, because each defends a branch of
+the runtime that nothing else exercised:
+
+| In the mock | What it defends |
+| --- | --- |
+| a stale form left in the DOM *after* the live one, same control names | every visibility filter in the runtime |
+| a grid that renders three rows at a time, more on `PageDown` | the scroll loop in `gridRow()` |
+| two dialogs stacked, sharing a button name | form scoping |
+| a value the client rewrites on blur | the assumption that a field keeps what was typed |
+
+[`mock/runtime.spec.ts`](mock/runtime.spec.ts) covers those. It is hand-written and
+lives outside `tests/` on purpose, so the real-environment config never picks it
+up. Worth knowing what it proves: the visibility filters in `locate()` and
+`withForm()` are redundant for the stale-form case - removing either alone still
+passes, removing both fails - so it guards the pair rather than each one.
 
 The mock run uses whatever Chromium `npm install` fetched. On an offline build
 agent, point `CHROMIUM_PATH` at a browser you already have.
