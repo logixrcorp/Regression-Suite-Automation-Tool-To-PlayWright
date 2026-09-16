@@ -32,7 +32,10 @@
       * a persistent .blockUI overlay that is toggled, never removed
       * grid rows as fixedDataTableRowLayout_ divs carrying a 1-based
         aria-rowindex, against a recorder that counts rows from zero
-      * a column-header filter flyout with an operator chooser
+      * a column-header filter flyout with an operator chooser, and a Reset
+        that clears it
+      * an action-pane command that only exists inside the overflow menu,
+        rendered outside the form that owns it
       * a checkbox that reports its state through the input, and a lookup that
         renders outside the form that opened it
 
@@ -59,6 +62,13 @@
         <div class="fixedDataTableRowLayout_main">
           <div aria-rowindex="3"><a href="#" data-row="2">000123</a><span>Northwind</span></div>
         </div>
+      </div>
+
+      <!-- The filter pane is a standing strip with its own Apply/Reset, not
+           the column-header flyout. -->
+      <div data-dyn-controlname="SystemDefinedFilterPane" class="filterPane">
+        <button type="button" id="filterReset">Reset</button>
+        <button type="button" id="filterApply">Apply</button>
       </div>
 
       <p>Filter applied: <span id="filterEcho">(none)</span></p>
@@ -152,6 +162,15 @@
     <input id="filterValue" />
   </div>
 
+  <!--
+    An action-pane command that did not fit. The client renders the overflow
+    menu outside the form, so a form-scoped search will not find it - which is
+    exactly the case the button selector list has to cover.
+  -->
+  <div class="overflow-menu sysPopup" id="overflowMenu">
+    <button type="button" name="PurchTable_ExportToExcel">Export to Excel</button>
+  </div>
+
   <script>
     const $ = (sel) => document.querySelector(sel);
     const blocker = $('#blocker');
@@ -218,6 +237,13 @@
         dlvMode.value = row.textContent.trim();
         hide($('#dlvModeLookup'));
       });
+    });
+
+    // ---- filter reset -----------------------------------------------------
+    $('#filterReset').addEventListener('click', () => {
+      block(150);
+      $('#filterEcho').textContent = '(none)';
+      hide($('#purchIdFilter'));
     });
 
     // ---- edit mode --------------------------------------------------------

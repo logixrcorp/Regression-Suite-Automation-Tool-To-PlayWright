@@ -84,10 +84,19 @@ public abstract record Action
     public sealed record SelectTreeItem(string Control, Value Path) : Action;
 
     /// <summary>
+    /// <c>CommandName=ExpandingPath</c> - open a branch of a tree without
+    /// selecting it.
+    /// </summary>
+    public sealed record ExpandTreeItem(string Control, Value Path) : Action;
+
+    /// <summary>
     /// <c>CommandName=ExecuteShortcuts</c> - a named client shortcut, such as
     /// the one that flips a page between View and Edit mode.
     /// </summary>
     public sealed record Shortcut(string Name) : Action;
+
+    /// <summary><c>CommandName=ResetFilters</c> - clear the filter pane.</summary>
+    public sealed record ResetFilters(string Control) : Action;
 
     /// <summary><c>CommandName=RequestClose</c>.</summary>
     public sealed record CloseForm : Action;
@@ -128,7 +137,9 @@ public abstract record Action
         OpenRow => "openRow",
         Filter => "filter",
         SelectTreeItem => "selectTreeItem",
+        ExpandTreeItem => "expandTreeItem",
         Shortcut => "shortcut",
+        ResetFilters => "resetFilters",
         CloseForm => "closeForm",
         Validate => "expectValue",
         Marker => "marker",
@@ -153,7 +164,9 @@ public abstract record Action
         OpenRow a => a.Grid,
         Filter a => $"{a.Field} {a.Operator} {a.Value.ToTs()}",
         SelectTreeItem a => $"{a.Control} <- {a.Path.ToTs()}",
+        ExpandTreeItem a => $"{a.Control} <- {a.Path.ToTs()}",
         Shortcut a => a.Name,
+        ResetFilters a => a.Control,
         CloseForm => "",
         Validate a => $"{a.Control} == {a.Expected.ToTs()}",
         Marker a => a.Text,
