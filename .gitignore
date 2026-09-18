@@ -11,3 +11,8 @@ playwright/.auth/
 [Bb]in/
 [Oo]bj/
 .vs/
+
+# Archives of the source, made to move a copy onto a test machine. One got
+# committed by an unexamined `git add -A`, and a stale copy of the source
+# sitting next to the source is the kind of thing someone edits by accident.
+*.zip
